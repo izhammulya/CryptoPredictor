@@ -769,32 +769,51 @@ def display_ml_results(data, results, method, driver_symbol, target_symbol, hori
     plt.tight_layout()
     st.pyplot(fig3)
     
-    # Trading suggestion based on prediction
-    st.subheader("💡 Trading Suggestion")
-    
-    suggestion_col1, suggestion_col2 = st.columns(2)
-    
-    with suggestion_col1:
-        if current_prediction_dir >= 0.7:
-            st.success(f"**STRONG BUY SIGNAL** 🟢")
-            st.write(f"- Probability of increase: {prob_up:.1f}%")
-            st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
-            st.write(f"- Confidence: High")
-        elif current_prediction_dir >= 0.6:
-            st.info(f"**MODERATE BUY SIGNAL** 🟡")
-            st.write(f"- Probability of increase: {prob_up:.1f}%")
-            st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
-            st.write(f"- Confidence: Medium")
-        elif current_prediction_dir >= 0.4:
-            st.warning(f"**HOLD SIGNAL** ⚪")
-            st.write(f"- Uncertainty: {min(prob_up, 100-prob_up):.1f}%")
-            st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
-            st.write(f"- Confidence: Low")
-        else:
-            st.error(f"**SELL SIGNAL** 🔴")
+    # In the display_ml_results function, replace the trading suggestion section with:
+
+# Trading suggestion based on prediction
+st.subheader("💡 Trading Suggestion")
+
+suggestion_col1, suggestion_col2 = st.columns(2)
+
+with suggestion_col1:
+    if current_prediction_dir >= 0.7 and price_change > 0:
+        st.success(f"**STRONG BUY SIGNAL** 🟢")
+        st.write(f"- Probability of increase: {prob_up:.1f}%")
+        st.write(f"- Expected price: ${predicted_price:.2f} (+{price_change:.1f}%)")
+        st.write(f"- Confidence: High")
+    elif current_prediction_dir >= 0.7 and price_change <= 0:
+        st.error(f"**STRONG SELL SIGNAL** 🔴")
+        st.write(f"- Probability of decrease: {100-prob_up:.1f}%")
+        st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
+        st.write(f"- Confidence: High")
+    elif current_prediction_dir >= 0.6 and price_change > 0:
+        st.info(f"**MODERATE BUY SIGNAL** 🟡")
+        st.write(f"- Probability of increase: {prob_up:.1f}%")
+        st.write(f"- Expected price: ${predicted_price:.2f} (+{price_change:.1f}%)")
+        st.write(f"- Confidence: Medium")
+    elif current_prediction_dir >= 0.6 and price_change <= 0:
+        st.warning(f"**MODERATE SELL SIGNAL** 🟠")
+        st.write(f"- Probability of decrease: {100-prob_up:.1f}%")
+        st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
+        st.write(f"- Confidence: Medium")
+    elif current_prediction_dir >= 0.4:
+        st.warning(f"**HOLD / NEUTRAL SIGNAL** ⚪")
+        st.write(f"- Direction uncertainty: {min(prob_up, 100-prob_up):.1f}%")
+        st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
+        st.write(f"- Confidence: Low - Wait for clearer signal")
+    else:
+        # current_prediction_dir < 0.4
+        if price_change < 0:
+            st.error(f"**STRONG SELL SIGNAL** 🔴")
             st.write(f"- Probability of decrease: {100-prob_up:.1f}%")
             st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
             st.write(f"- Confidence: High")
+        else:
+            st.warning(f"**CONTRADICTORY SIGNAL** ⚠️")
+            st.write(f"- Direction probability: {prob_up:.1f}% (Sell)")
+            st.write(f"- But price prediction: +{price_change:.1f}%")
+            st.write(f"- Recommendation: Wait for confirmation")
     
     with suggestion_col2:
         st.write("**Prediction Details:**")
@@ -1431,6 +1450,7 @@ st.sidebar.info("""
 # # # Run the app
 # # if __name__ == "__main__":
 # #     main()
+
 
 
 
