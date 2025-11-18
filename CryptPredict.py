@@ -17,29 +17,29 @@ except ImportError as e:
 
 # Streamlit app configuration
 st.set_page_config(
-    page_title="Fast Crypto Predictor",
+    page_title="Crypto Horizon Predictor",
     page_icon="🚀",
     layout="wide"
 )
 
 # App title and description
-st.title("🚀 Fast Crypto Predictor with Optimized Oscillators")
+st.title("🚀 Crypto Horizon Predictor with Monte Carlo Paths")
 st.markdown("""
-**Optimized for Speed:**
-- **Fast oscillator approximations** instead of ODE solving
-- **Reduced data points** for quicker processing
-- **Parallel feature calculation**
-- **Smart caching** of results
+**Clear Visualizations:**
+- **Price Prediction Horizon** with future dates
+- **Monte Carlo Simulation Paths** visible on graph
+- **Confidence Intervals** for price targets
+- **Multiple Timeframes** for predictions
 """)
 
 # Sidebar configuration
-st.sidebar.header("⚡ Fast Configuration")
+st.sidebar.header("🎯 Prediction Configuration")
 
 # Date range input
 st.sidebar.subheader("📅 Date Range")
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    start_date = st.date_input("Start Date", value=pd.to_datetime("2023-01-01"))  # Shorter default
+    start_date = st.date_input("Start Date", value=pd.to_datetime("2023-01-01"))
 with col2:
     end_date = st.date_input("End Date", value=pd.to_datetime("today"))
 
@@ -54,150 +54,85 @@ crypto_options = {
     "SOL-USD": "Solana"
 }
 
-driver_symbol = st.sidebar.selectbox(
-    "Driver Cryptocurrency",
-    options=list(crypto_options.keys()),
-    index=0
-)
-
 target_symbol = st.sidebar.selectbox(
     "Target Cryptocurrency", 
     options=list(crypto_options.keys()),
     index=3
 )
 
-# Performance Settings
-st.sidebar.subheader("⚡ Performance Settings")
-use_fast_mode = st.sidebar.checkbox("Ultra Fast Mode", value=True, 
-                                   help="Uses simplified calculations for maximum speed")
-
-if use_fast_mode:
-    data_points = st.sidebar.slider("Data Points to Use", 50, 200, 80)
-    oscillator_window = 20  # Fixed smaller window
-else:
-    data_points = st.sidebar.slider("Data Points to Use", 100, 500, 150)
-    oscillator_window = st.sidebar.slider("Oscillator Window", 20, 40, 25)
-
-use_oscillator = st.sidebar.checkbox("Use Fast Oscillator Features", value=True)
-
-# Model parameters
+# Prediction Settings
 st.sidebar.subheader("🎯 Prediction Settings")
-prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 14, 5)
-model_type = st.sidebar.selectbox("Model Type", ["Logistic Regression", "Random Forest"], index=0)
+prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 30, 7)
+show_multiple_horizons = st.sidebar.checkbox("Show Multiple Horizons", value=True)
+
+if show_multiple_horizons:
+    horizons = st.sidebar.multiselect(
+        "Additional Horizons to Show",
+        [1, 3, 5, 10, 14, 21, 30],
+        default=[1, 3, 10]
+    )
+else:
+    horizons = [prediction_horizon]
 
 # Monte Carlo Settings
-st.sidebar.subheader("📊 Simulation Settings")
-num_simulations = st.sidebar.slider("Monte Carlo Simulations", 100, 2000, 500)
-confidence_level = st.sidebar.slider("Confidence Level", 80, 95, 90)
+st.sidebar.subheader("🎲 Monte Carlo Simulation")
+num_simulations = st.sidebar.slider("Number of Paths", 50, 1000, 200)
+num_paths_to_show = st.sidebar.slider("Paths to Visualize", 10, 100, 50)
+confidence_level = st.sidebar.slider("Confidence Level", 80, 99, 90)
 
-# FAST Oscillator Functions
-def fast_oscillator_approximation(driver_prices, target_prices):
-    """
-    Fast approximation of oscillator parameters without ODE solving
-    """
-    if len(driver_prices) < 10:
-        return 0.1, 1.0, 1.0
-    
-    try:
-        # Calculate returns
-        driver_rets = np.diff(np.log(driver_prices))
-        target_rets = np.diff(np.log(target_prices))
-        
-        # Alpha: Damping from autocorrelation (simplified)
-        if len(target_rets) > 1:
-            autocorr = np.corrcoef(target_rets[:-1], target_rets[1:])[0,1]
-            alpha = max(0.01, 0.5 * (1 - autocorr))
-        else:
-            alpha = 0.1
-        
-        # Omega: Frequency from volatility (simplified)
-        if len(target_rets) > 0:
-            volatility = np.std(target_rets)
-            omega = max(0.1, 2 * np.pi * volatility * 10)  # Scale factor
-        else:
-            omega = 1.0
-        
-        # K: Coupling from correlation (simplified)
-        if len(driver_rets) > 0 and len(target_rets) > 0:
-            min_len = min(len(driver_rets), len(target_rets))
-            correlation = np.corrcoef(driver_rets[:min_len], target_rets[:min_len])[0,1]
-            k = correlation * 2.0  # Scale factor
-        else:
-            k = 1.0
-        
-        return alpha, omega, k
-        
-    except:
-        return 0.1, 1.0, 1.0
+show_paths = st.sidebar.checkbox("Show Monte Carlo Paths", value=True)
+show_confidence_bands = st.sidebar.checkbox("Show Confidence Bands", value=True)
 
-def calculate_fast_oscillator_features(data, window):
-    """Calculate oscillator features quickly"""
-    if len(data) < window:
-        return data
+# Enhanced Monte Carlo Simulation
+def enhanced_monte_carlo(current_price, historical_returns, horizon, n_simulations):
+    """Enhanced Monte Carlo with better price simulation"""
     
-    # Use every 3rd data point to speed up calculation
-    step = 3 if use_fast_mode else 2
-    indices = list(range(window, len(data), step))
+    # Use historical return characteristics
+    mean_return = np.mean(historical_returns)
+    std_return = np.std(historical_returns)
     
-    alphas, omegas, ks = [], [], []
+    # Generate random returns based on historical characteristics
+    random_returns = np.random.normal(mean_return, std_return, (horizon, n_simulations))
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    # Calculate price paths
+    price_paths = np.zeros((horizon + 1, n_simulations))
+    price_paths[0] = current_price
     
-    for i, idx in enumerate(indices):
-        window_slice = slice(idx - window, idx)
-        driver_vals = data['driver_close'].iloc[window_slice].values
-        target_vals = data['target_close'].iloc[window_slice].values
-        
-        alpha, omega, k = fast_oscillator_approximation(driver_vals, target_vals)
-        alphas.append(alpha)
-        omegas.append(omega)
-        ks.append(k)
-        
-        if i % 5 == 0:  # Update progress less frequently
-            progress = (i + 1) / len(indices)
-            progress_bar.progress(progress)
-            status_text.text(f"Fast oscillator calculation... {i+1}/{len(indices)}")
-    
-    # Add oscillator features to dataframe
-    data['oscillator_alpha'] = np.nan
-    data['oscillator_omega'] = np.nan
-    data['oscillator_k'] = np.nan
-    
-    # Assign values only at calculated indices
-    for i, idx in enumerate(indices):
-        if idx < len(data):
-            data.iloc[idx, data.columns.get_loc('oscillator_alpha')] = alphas[i]
-            data.iloc[idx, data.columns.get_loc('oscillator_omega')] = omegas[i]
-            data.iloc[idx, data.columns.get_loc('oscillator_k')] = ks[i]
-    
-    # Forward fill missing values
-    data['oscillator_alpha'] = data['oscillator_alpha'].ffill()
-    data['oscillator_omega'] = data['oscillator_omega'].ffill()
-    data['oscillator_k'] = data['oscillator_k'].ffill()
-    
-    progress_bar.progress(1.0)
-    status_text.text("Fast oscillator calculation complete!")
-    
-    return data
-
-# Fast Monte Carlo Simulation
-def fast_monte_carlo(current_price, volatility, horizon, n_simulations):
-    """Optimized Monte Carlo simulation"""
-    # Vectorized implementation for speed
-    random_returns = np.random.normal(0, volatility, (horizon, n_simulations))
-    cumulative_returns = np.cumsum(random_returns, axis=0)
-    price_paths = current_price * np.exp(cumulative_returns)
+    for day in range(1, horizon + 1):
+        price_paths[day] = price_paths[day-1] * (1 + random_returns[day-1])
     
     return price_paths
 
+def calculate_horizon_predictions(price_paths, confidence_level):
+    """Calculate predictions for each horizon"""
+    horizon_predictions = {}
+    
+    for day in range(1, price_paths.shape[0]):
+        prices_at_horizon = price_paths[day]
+        
+        alpha = (100 - confidence_level) / 2
+        lower_bound = np.percentile(prices_at_horizon, alpha)
+        upper_bound = np.percentile(prices_at_horizon, 100 - alpha)
+        median_price = np.median(prices_at_horizon)
+        mean_price = np.mean(prices_at_horizon)
+        
+        horizon_predictions[day] = {
+            'lower_bound': lower_bound,
+            'upper_bound': upper_bound,
+            'median_price': median_price,
+            'mean_price': mean_price,
+            'prices': prices_at_horizon
+        }
+    
+    return horizon_predictions
+
 # Main function
 def main():
-    if st.sidebar.button("⚡ Run Fast Prediction", type="primary"):
-        run_fast_prediction()
+    if st.sidebar.button("🎯 Generate Horizon Predictions", type="primary"):
+        run_horizon_prediction()
 
-def run_fast_prediction():
-    """Optimized main prediction function"""
+def run_horizon_prediction():
+    """Main prediction function with clear horizon visualization"""
     
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
@@ -206,313 +141,799 @@ def run_fast_prediction():
     status_text = st.empty()
     
     try:
-        # Step 1: Download limited data
-        status_text.text("📥 Downloading data (optimized)...")
-        progress_bar.progress(10)
+        # Step 1: Download data
+        status_text.text("📥 Downloading price data...")
+        progress_bar.progress(20)
         
-        df_driver = yf.download(driver_symbol, start=start_str, end=end_str, progress=False, interval="1d")
-        df_target = yf.download(target_symbol, start=start_str, end=end_str, progress=False, interval="1d")
+        df = yf.download(target_symbol, start=start_str, end=end_str, progress=False)
         
-        if df_driver.empty or df_target.empty:
+        if df.empty:
             st.error("❌ Failed to download data.")
             return
         
-        # Step 2: Quick data processing
-        status_text.text("🔄 Fast data processing...")
-        progress_bar.progress(30)
+        # Step 2: Prepare data
+        status_text.text("🔄 Preparing data for simulation...")
+        progress_bar.progress(40)
         
-        data = quick_data_processing(df_driver, df_target, data_points)
+        data = df[['Close']].copy()
+        data['Returns'] = data['Close'].pct_change()
+        data = data.dropna()
         
-        if data is None:
-            st.error("❌ Not enough data for analysis.")
-            return
+        current_price = data['Close'].iloc[-1]
+        historical_returns = data['Returns'].tail(100).values  # Use recent returns
         
-        # Step 3: Fast oscillator features
-        if use_oscillator:
-            status_text.text("🎯 Fast oscillator calculation...")
-            progress_bar.progress(50)
-            data = calculate_fast_oscillator_features(data, oscillator_window)
-        else:
-            data['oscillator_alpha'] = np.nan
-            data['oscillator_omega'] = np.nan
-            data['oscillator_k'] = np.nan
+        # Step 3: Run Monte Carlo for maximum horizon
+        status_text.text("🎲 Running Monte Carlo simulations...")
+        progress_bar.progress(60)
         
-        # Step 4: Quick feature preparation
-        status_text.text("🔧 Preparing features...")
-        progress_bar.progress(65)
+        max_horizon = max(horizons) if horizons else prediction_horizon
+        price_paths = enhanced_monte_carlo(current_price, historical_returns, max_horizon, num_simulations)
         
-        feature_cols = prepare_fast_features(data, use_oscillator)
-        X, y, features_for_forecast, dates_clean = create_fast_features_target(data, feature_cols, prediction_horizon)
+        # Calculate predictions for all horizons
+        horizon_predictions = calculate_horizon_predictions(price_paths, confidence_level)
         
-        if X.shape[0] == 0:
-            st.error("❌ No valid data for training.")
-            return
+        # Step 4: Generate future dates
+        last_date = data.index[-1]
+        future_dates = [last_date + timedelta(days=i) for i in range(max_horizon + 1)]
         
-        # Step 5: Fast model training
-        status_text.text("🤖 Training model...")
+        status_text.text("📊 Creating visualizations...")
         progress_bar.progress(80)
         
-        results = train_fast_model(X, y, features_for_forecast, model_type, dates_clean)
-        
-        # Step 6: Quick Monte Carlo
-        status_text.text("📊 Running simulations...")
-        progress_bar.progress(90)
-        
-        current_price = data['target_close'].iloc[-1]
-        volatility = data['target_ret_1'].std()
-        
-        simulations = fast_monte_carlo(current_price, volatility, prediction_horizon, num_simulations)
-        final_prices = simulations[-1, :]
-        
-        alpha = (100 - confidence_level) / 2
-        lower_bound = np.percentile(final_prices, alpha)
-        upper_bound = np.percentile(final_prices, 100 - alpha)
-        median_price = np.median(final_prices)
-        
-        prediction_intervals = {
-            'lower_bound': lower_bound,
-            'upper_bound': upper_bound,
-            'median_price': median_price,
-            'final_prices': final_prices
-        }
-        
-        full_results = {
-            **results,
-            'monte_carlo': {
-                'simulations': simulations,
-                'intervals': prediction_intervals,
-                'current_price': current_price
-            },
-            'data': data
-        }
-        
-        # Step 7: Display results
-        status_text.text("🎯 Generating results...")
-        progress_bar.progress(95)
-        
-        display_fast_results(data, full_results, driver_symbol, target_symbol, prediction_horizon)
+        # Display results
+        display_horizon_predictions(data, price_paths, horizon_predictions, future_dates, 
+                                  target_symbol, current_price, horizons)
         
         progress_bar.progress(100)
-        status_text.text("✅ Analysis complete! (Fast mode)")
+        status_text.text("✅ Horizon predictions complete!")
         
     except Exception as e:
         st.error(f"❌ An error occurred: {str(e)}")
 
-def quick_data_processing(df_driver, df_target, max_points):
-    """Fast data processing with limited points"""
+def display_horizon_predictions(data, price_paths, horizon_predictions, future_dates, 
+                              symbol, current_price, horizons):
+    """Display horizon predictions with clear Monte Carlo visualization"""
     
-    data = pd.DataFrame(index=df_driver.index)
-    data['driver_close'] = df_driver['Close']
-    data['target_close'] = df_target['Close']
-    data = data.dropna()
+    # Main results header
+    st.header(f"🎯 {symbol} Price Horizon Predictions")
     
-    if len(data) < 30:
-        return None
-    
-    # Use only recent data points
-    data = data.tail(max_points).copy()
-    
-    # Calculate only essential features
-    data['driver_ret_1'] = data['driver_close'].pct_change(1)
-    data['target_ret_1'] = data['target_close'].pct_change(1)
-    
-    data['driver_vol'] = data['driver_ret_1'].rolling(10).std()
-    data['target_vol'] = data['target_ret_1'].rolling(10).std()
-    
-    data['price_ratio'] = data['target_close'] / data['driver_close']
-    data['rolling_corr'] = data['driver_ret_1'].rolling(15).corr(data['target_ret_1'])
-    
-    # Simple momentum
-    data['target_momentum'] = data['target_close'] / data['target_close'].rolling(5).mean() - 1
-    
-    return data
-
-def prepare_fast_features(data, use_oscillator):
-    """Prepare minimal feature set"""
-    
-    base_features = [
-        'driver_ret_1', 'target_ret_1', 'driver_vol', 'target_vol',
-        'price_ratio', 'rolling_corr', 'target_momentum'
-    ]
-    
-    if use_oscillator:
-        oscillator_features = ['oscillator_alpha', 'oscillator_omega', 'oscillator_k']
-        for feature in oscillator_features:
-            if feature in data.columns and not data[feature].isna().all():
-                base_features.append(feature)
-    
-    return [col for col in base_features if col in data.columns and not data[col].isna().all()]
-
-def create_fast_features_target(data, feature_cols, prediction_horizon):
-    """Fast feature and target creation"""
-    
-    data['future_price'] = data['target_close'].shift(-prediction_horizon)
-    data['target_up'] = (data['future_price'] > data['target_close']).astype(int)
-    
-    data_clean = data.dropna().copy()
-    
-    if len(data_clean) == 0:
-        raise ValueError("No valid data after preprocessing")
-    
-    X = data_clean[feature_cols].values
-    y = data_clean['target_up'].values
-    dates_clean = data_clean.index
-    
-    features_for_forecast = data_clean.iloc[-1][feature_cols].values.reshape(1, -1)
-    
-    return X, y, features_for_forecast, dates_clean
-
-def train_fast_model(X, y, features_for_forecast, model_type, dates):
-    """Fast model training"""
-    
-    if len(X) < 10:
-        raise ValueError("Not enough samples for training")
-    
-    split_idx = max(5, int(len(X) * 0.7))
-    
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-    dates_test = dates[split_idx:]
-    
-    if model_type == "Logistic Regression":
-        classifier = LogisticRegression(random_state=42, max_iter=500, class_weight='balanced')
-    else:
-        classifier = RandomForestClassifier(n_estimators=50, random_state=42, class_weight='balanced', max_depth=5)
-    
-    pipeline = Pipeline([
-        ('scaler', StandardScaler()),
-        ('classifier', classifier)
-    ])
-    
-    pipeline.fit(X_train, y_train)
-    
-    y_pred_proba = pipeline.predict_proba(X_test)[:, 1]
-    y_pred = (y_pred_proba >= 0.5).astype(int)
-    
-    forecast_proba = pipeline.predict_proba(features_for_forecast)[0, 1]
-    
-    return {
-        'pipeline': pipeline,
-        'y_test': y_test,
-        'y_pred': y_pred,
-        'y_pred_proba': y_pred_proba,
-        'forecast_proba': forecast_proba,
-        'dates_test': dates_test,
-    }
-
-def display_fast_results(data, results, driver_symbol, target_symbol, prediction_horizon):
-    """Fast results display"""
-    
-    current_price = results['monte_carlo']['current_price']
-    intervals = results['monte_carlo']['intervals']
-    
-    # Generate future dates
-    last_date = data.index[-1]
-    prediction_date = last_date + timedelta(days=prediction_horizon)
-    
-    # Quick results display
-    st.header("⚡ Fast Prediction Results")
-    
+    # Current price and key metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Current Price", f"${current_price:.2f}")
     with col2:
-        direction = "BULLISH" if results['forecast_proba'] >= 0.5 else "BEARISH"
-        st.metric("Direction", direction)
+        main_horizon = horizons[0] if horizons else 7
+        main_pred = horizon_predictions[main_horizon]
+        expected_change = ((main_pred['median_price'] - current_price) / current_price) * 100
+        st.metric(f"{main_horizon}-Day Expected", f"${main_pred['median_price']:.2f}", 
+                 f"{expected_change:+.1f}%")
     with col3:
-        st.metric("Confidence", f"{results['forecast_proba']:.1%}")
+        prob_up = np.mean(main_pred['prices'] > current_price) * 100
+        st.metric("Probability Up", f"{prob_up:.1f}%")
     with col4:
-        change = ((intervals['median_price'] - current_price) / current_price) * 100
-        st.metric("Expected Change", f"{change:+.1f}%")
+        st.metric("Confidence Level", f"{confidence_level}%")
     
-    # Oscillator visualization (if used)
-    if use_oscillator and not data['oscillator_alpha'].isna().all():
-        st.subheader("🎯 Fast Oscillator Analysis")
-        
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-        
-        # Plot latest oscillator values
-        params = ['Alpha', 'Omega', 'K']
-        values = [
-            data['oscillator_alpha'].iloc[-1],
-            data['oscillator_omega'].iloc[-1], 
-            data['oscillator_k'].iloc[-1]
-        ]
-        colors = ['red', 'blue', 'green']
-        
-        bars = ax1.bar(params, values, color=colors, alpha=0.7)
-        ax1.set_title('Current Oscillator State')
-        ax1.set_ylabel('Parameter Value')
-        
-        for bar, value in zip(bars, values):
-            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f'{value:.3f}', ha='center', va='bottom')
-        
-        # Plot oscillator evolution (last 20 points)
-        recent_data = data.tail(20)
-        ax2.plot(recent_data.index, recent_data['oscillator_alpha'], 'r-', label='Alpha', alpha=0.7)
-        ax2.plot(recent_data.index, recent_data['oscillator_omega'], 'b-', label='Omega', alpha=0.7)
-        ax2.plot(recent_data.index, recent_data['oscillator_k'], 'g-', label='K', alpha=0.7)
-        ax2.set_title('Recent Oscillator Trends')
-        ax2.legend()
-        ax2.tick_params(axis='x', rotation=45)
-        
-        plt.tight_layout()
-        st.pyplot(fig)
+    # MAIN VISUALIZATION: Price History + Monte Carlo Future
+    st.subheader("📈 Price History with Monte Carlo Future Paths")
     
-    # Combined prediction plot
-    st.subheader("📈 Fast Prediction Overview")
+    fig1, ax1 = plt.subplots(figsize=(14, 8))
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    # Plot historical prices (last 60 days for clarity)
+    historical_to_show = data.tail(60)
+    ax1.plot(historical_to_show.index, historical_to_show['Close'], 
+             'b-', linewidth=3, label='Historical Price', alpha=0.8)
     
-    # Left: Probability timeline
-    dates_test = results['dates_test']
-    y_pred_proba = results['y_pred_proba']
+    # Plot current price as reference
+    ax1.axhline(y=current_price, color='black', linestyle='--', alpha=0.7, 
+                label=f'Current Price: ${current_price:.2f}')
     
-    ax1.plot(dates_test, y_pred_proba, 'b-', alpha=0.7, linewidth=2)
-    ax1.axhline(0.5, color='red', linestyle='--', alpha=0.5)
-    ax1.set_title('Prediction Probability Timeline')
-    ax1.set_ylabel('Probability')
-    ax1.tick_params(axis='x', rotation=45)
+    # Plot Monte Carlo paths
+    if show_paths:
+        paths_to_show = min(num_paths_to_show, num_simulations)
+        for i in range(paths_to_show):
+            ax1.plot(future_dates, price_paths[:, i], 'gray', alpha=0.1, linewidth=0.5)
+    
+    # Plot confidence bands
+    if show_confidence_bands:
+        percentiles = np.percentile(price_paths, [5, 25, 50, 75, 95], axis=1)
+        
+        # 90% confidence interval
+        ax1.fill_between(future_dates, percentiles[0], percentiles[4], 
+                        alpha=0.2, color='red', label='90% Confidence Interval')
+        
+        # 50% confidence interval
+        ax1.fill_between(future_dates, percentiles[1], percentiles[3], 
+                        alpha=0.3, color='orange', label='50% Confidence Interval')
+        
+        # Median path
+        ax1.plot(future_dates, percentiles[2], 'r-', linewidth=3, 
+                label='Median Prediction Path', alpha=0.8)
+    
+    # Add vertical line separating history from future
+    ax1.axvline(x=future_dates[0], color='green', linestyle=':', alpha=0.7, 
+                label='Prediction Start')
+    
+    # Add horizon markers
+    colors = ['purple', 'brown', 'teal', 'magenta', 'navy']
+    for i, horizon in enumerate(horizons):
+        if horizon <= len(future_dates) - 1:
+            horizon_date = future_dates[horizon]
+            pred = horizon_predictions[horizon]
+            
+            # Vertical line at horizon
+            ax1.axvline(x=horizon_date, color=colors[i % len(colors)], linestyle='--', 
+                       alpha=0.6, label=f'{horizon}-Day Horizon')
+            
+            # Price target markers
+            ax1.plot(horizon_date, pred['median_price'], 'o', color=colors[i % len(colors)], 
+                    markersize=8, markeredgecolor='white', markeredgewidth=1)
+    
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Price ($)')
+    ax1.set_title(f'{symbol} Price Prediction with Monte Carlo Simulation\n'
+                 f'Showing {num_simulations} simulations with {confidence_level}% confidence intervals')
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax1.grid(True, alpha=0.3)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
     
-    # Right: Monte Carlo distribution
-    final_prices = intervals['final_prices']
-    ax2.hist(final_prices, bins=30, alpha=0.7, color='lightblue', edgecolor='black')
-    ax2.axvline(intervals['lower_bound'], color='red', linestyle='--', label=f'Lower: ${intervals["lower_bound"]:.2f}')
-    ax2.axvline(intervals['median_price'], color='green', linestyle='-', label=f'Median: ${intervals["median_price"]:.2f}')
-    ax2.axvline(intervals['upper_bound'], color='red', linestyle='--', label=f'Upper: ${intervals["upper_bound"]:.2f}')
-    ax2.axvline(current_price, color='blue', linestyle='-', label=f'Current: ${current_price:.2f}')
-    ax2.set_title(f'Price Distribution ({confidence_level}% CI)')
-    ax2.set_xlabel('Price')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
+    st.pyplot(fig1)
+    
+    # HORIZON PREDICTION TABLE
+    st.subheader("📊 Horizon Prediction Summary")
+    
+    prediction_data = []
+    for horizon in sorted(horizons):
+        if horizon in horizon_predictions:
+            pred = horizon_predictions[horizon]
+            horizon_date = future_dates[horizon]
+            
+            price_change = ((pred['median_price'] - current_price) / current_price) * 100
+            lower_change = ((pred['lower_bound'] - current_price) / current_price) * 100
+            upper_change = ((pred['upper_bound'] - current_price) / current_price) * 100
+            
+            prob_up = np.mean(pred['prices'] > current_price) * 100
+            
+            prediction_data.append({
+                'Horizon (Days)': horizon,
+                'Prediction Date': horizon_date.strftime('%Y-%m-%d'),
+                'Median Price': f"${pred['median_price']:.2f}",
+                'Price Change': f"{price_change:+.1f}%",
+                'Confidence Interval': f"${pred['lower_bound']:.2f} - ${pred['upper_bound']:.2f}",
+                'Range Change': f"{lower_change:+.1f}% to {upper_change:+.1f}%",
+                'Probability Up': f"{prob_up:.1f}%"
+            })
+    
+    prediction_df = pd.DataFrame(prediction_data)
+    st.dataframe(prediction_df, use_container_width=True)
+    
+    # MONTE CARLO DISTRIBUTION BY HORIZON
+    st.subheader("📈 Price Distribution by Horizon")
+    
+    fig2, axes = plt.subplots(2, 2, figsize=(15, 10))
+    axes = axes.flatten()
+    
+    horizons_to_plot = horizons[:4]  # Plot first 4 horizons
+    
+    for idx, horizon in enumerate(horizons_to_plot):
+        if idx < len(axes) and horizon in horizon_predictions:
+            pred = horizon_predictions[horizon]
+            prices = pred['prices']
+            
+            axes[idx].hist(prices, bins=30, alpha=0.7, color='skyblue', edgecolor='black', density=True)
+            axes[idx].axvline(pred['lower_bound'], color='red', linestyle='--', 
+                            label=f'Lower: ${pred["lower_bound"]:.2f}')
+            axes[idx].axvline(pred['median_price'], color='green', linestyle='-', 
+                            label=f'Median: ${pred["median_price"]:.2f}')
+            axes[idx].axvline(pred['upper_bound'], color='red', linestyle='--', 
+                            label=f'Upper: ${pred["upper_bound"]:.2f}')
+            axes[idx].axvline(current_price, color='blue', linestyle='-', 
+                            label=f'Current: ${current_price:.2f}')
+            
+            axes[idx].set_xlabel('Price ($)')
+            axes[idx].set_ylabel('Probability Density')
+            axes[idx].set_title(f'{horizon}-Day Horizon Distribution\n'
+                              f'90% CI: [${pred["lower_bound"]:.2f}, ${pred["upper_bound"]:.2f}]')
+            axes[idx].legend()
+            axes[idx].grid(True, alpha=0.3)
+    
+    # Hide unused subplots
+    for idx in range(len(horizons_to_plot), len(axes)):
+        axes[idx].set_visible(False)
     
     plt.tight_layout()
-    st.pyplot(fig)
+    st.pyplot(fig2)
     
-    # Quick stats
-    st.subheader("📊 Quick Statistics")
+    # RISK ANALYSIS
+    st.subheader("⚡ Risk Analysis by Horizon")
     
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        accuracy = accuracy_score(results['y_test'], results['y_pred'])
-        st.metric("Model Accuracy", f"{accuracy:.3f}")
-    with col2:
-        prob_down = np.mean(intervals['final_prices'] < current_price)
-        st.metric("Prob. Decline", f"{prob_down:.1%}")
-    with col3:
-        best_case = np.max(intervals['final_prices'])
-        best_gain = ((best_case - current_price) / current_price) * 100
-        st.metric("Best Case", f"{best_gain:+.1f}%")
-    with col4:
-        st.metric("Horizon", f"{prediction_horizon} days")
+    risk_data = []
+    for horizon in sorted(horizons):
+        if horizon in horizon_predictions:
+            pred = horizon_predictions[horizon]
+            prices = pred['prices']
+            
+            # Risk metrics
+            prob_decline = np.mean(prices < current_price) * 100
+            var_95 = np.percentile(prices, 5)  # Value at Risk 95%
+            var_loss = ((var_95 - current_price) / current_price) * 100
+            best_case = np.max(prices)
+            best_gain = ((best_case - current_price) / current_price) * 100
+            worst_case = np.min(prices)
+            worst_loss = ((worst_case - current_price) / current_price) * 100
+            
+            risk_data.append({
+                'Horizon': f'{horizon} days',
+                'Prob. Decline': f'{prob_decline:.1f}%',
+                'VaR (95%)': f'{var_loss:.1f}%',
+                'Worst Case': f'{worst_loss:.1f}%',
+                'Best Case': f'{best_gain:.1f}%',
+                'Expected Return': f"{((pred['median_price'] - current_price) / current_price * 100):+.1f}%"
+            })
+    
+    risk_df = pd.DataFrame(risk_data)
+    st.dataframe(risk_df, use_container_width=True)
+    
+    # DOWNLOAD PREDICTION DATA
+    st.subheader("💾 Download Prediction Data")
+    
+    # Create downloadable dataframe
+    download_data = []
+    for horizon in sorted(horizons):
+        if horizon in horizon_predictions:
+            pred = horizon_predictions[horizon]
+            download_data.append({
+                'horizon_days': horizon,
+                'prediction_date': future_dates[horizon].strftime('%Y-%m-%d'),
+                'median_price': pred['median_price'],
+                'lower_bound': pred['lower_bound'],
+                'upper_bound': pred['upper_bound'],
+                'probability_up': np.mean(pred['prices'] > current_price) * 100
+            })
+    
+    download_df = pd.DataFrame(download_data)
+    csv = download_df.to_csv(index=False)
+    
+    st.download_button(
+        label="📥 Download Horizon Predictions CSV",
+        data=csv,
+        file_name=f"{symbol}_horizon_predictions.csv",
+        mime="text/csv"
+    )
 
 # Run the app
 if __name__ == "__main__":
     main()
 
+# Add explanation
+st.sidebar.markdown("---")
+st.sidebar.info("""
+**🎯 What You'll See:**
+- **Monte Carlo Paths**: Gray lines showing possible price trajectories
+- **Confidence Bands**: Colored areas showing prediction uncertainty
+- **Horizon Markers**: Vertical lines at prediction dates
+- **Price Targets**: Dots showing median predictions at each horizon
+- **Distribution Charts**: Probability distributions for each timeframe
+""")
 
+
+#V1 Sistem
+# import streamlit as st
+# import numpy as np
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# from datetime import datetime, timedelta
+
+# try:
+#     import yfinance as yf
+#     from sklearn.linear_model import LogisticRegression
+#     from sklearn.ensemble import RandomForestClassifier
+#     from sklearn.preprocessing import StandardScaler
+#     from sklearn.pipeline import Pipeline
+#     from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+# except ImportError as e:
+#     st.error(f"Missing required packages: {e}")
+#     st.stop()
+
+# # Streamlit app configuration
+# st.set_page_config(
+#     page_title="Fast Crypto Predictor",
+#     page_icon="🚀",
+#     layout="wide"
+# )
+
+# # App title and description
+# st.title("🚀 Fast Crypto Predictor with Optimized Oscillators")
+# st.markdown("""
+# **Optimized for Speed:**
+# - **Fast oscillator approximations** instead of ODE solving
+# - **Reduced data points** for quicker processing
+# - **Parallel feature calculation**
+# - **Smart caching** of results
+# """)
+
+# # Sidebar configuration
+# st.sidebar.header("⚡ Fast Configuration")
+
+# # Date range input
+# st.sidebar.subheader("📅 Date Range")
+# col1, col2 = st.sidebar.columns(2)
+# with col1:
+#     start_date = st.date_input("Start Date", value=pd.to_datetime("2023-01-01"))  # Shorter default
+# with col2:
+#     end_date = st.date_input("End Date", value=pd.to_datetime("today"))
+
+# # Cryptocurrency selection
+# st.sidebar.subheader("💰 Cryptocurrencies")
+# crypto_options = {
+#     "ETH-USD": "Ethereum",
+#     "BTC-USD": "Bitcoin", 
+#     "LINK-USD": "Chainlink",
+#     "INJ-USD": "Injective",
+#     "ADA-USD": "Cardano",
+#     "SOL-USD": "Solana"
+# }
+
+# driver_symbol = st.sidebar.selectbox(
+#     "Driver Cryptocurrency",
+#     options=list(crypto_options.keys()),
+#     index=0
+# )
+
+# target_symbol = st.sidebar.selectbox(
+#     "Target Cryptocurrency", 
+#     options=list(crypto_options.keys()),
+#     index=3
+# )
+
+# # Performance Settings
+# st.sidebar.subheader("⚡ Performance Settings")
+# use_fast_mode = st.sidebar.checkbox("Ultra Fast Mode", value=True, 
+#                                    help="Uses simplified calculations for maximum speed")
+
+# if use_fast_mode:
+#     data_points = st.sidebar.slider("Data Points to Use", 50, 200, 80)
+#     oscillator_window = 20  # Fixed smaller window
+# else:
+#     data_points = st.sidebar.slider("Data Points to Use", 100, 500, 150)
+#     oscillator_window = st.sidebar.slider("Oscillator Window", 20, 40, 25)
+
+# use_oscillator = st.sidebar.checkbox("Use Fast Oscillator Features", value=True)
+
+# # Model parameters
+# st.sidebar.subheader("🎯 Prediction Settings")
+# prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 14, 5)
+# model_type = st.sidebar.selectbox("Model Type", ["Logistic Regression", "Random Forest"], index=0)
+
+# # Monte Carlo Settings
+# st.sidebar.subheader("📊 Simulation Settings")
+# num_simulations = st.sidebar.slider("Monte Carlo Simulations", 100, 2000, 500)
+# confidence_level = st.sidebar.slider("Confidence Level", 80, 95, 90)
+
+# # FAST Oscillator Functions
+# def fast_oscillator_approximation(driver_prices, target_prices):
+#     """
+#     Fast approximation of oscillator parameters without ODE solving
+#     """
+#     if len(driver_prices) < 10:
+#         return 0.1, 1.0, 1.0
+    
+#     try:
+#         # Calculate returns
+#         driver_rets = np.diff(np.log(driver_prices))
+#         target_rets = np.diff(np.log(target_prices))
+        
+#         # Alpha: Damping from autocorrelation (simplified)
+#         if len(target_rets) > 1:
+#             autocorr = np.corrcoef(target_rets[:-1], target_rets[1:])[0,1]
+#             alpha = max(0.01, 0.5 * (1 - autocorr))
+#         else:
+#             alpha = 0.1
+        
+#         # Omega: Frequency from volatility (simplified)
+#         if len(target_rets) > 0:
+#             volatility = np.std(target_rets)
+#             omega = max(0.1, 2 * np.pi * volatility * 10)  # Scale factor
+#         else:
+#             omega = 1.0
+        
+#         # K: Coupling from correlation (simplified)
+#         if len(driver_rets) > 0 and len(target_rets) > 0:
+#             min_len = min(len(driver_rets), len(target_rets))
+#             correlation = np.corrcoef(driver_rets[:min_len], target_rets[:min_len])[0,1]
+#             k = correlation * 2.0  # Scale factor
+#         else:
+#             k = 1.0
+        
+#         return alpha, omega, k
+        
+#     except:
+#         return 0.1, 1.0, 1.0
+
+# def calculate_fast_oscillator_features(data, window):
+#     """Calculate oscillator features quickly"""
+#     if len(data) < window:
+#         return data
+    
+#     # Use every 3rd data point to speed up calculation
+#     step = 3 if use_fast_mode else 2
+#     indices = list(range(window, len(data), step))
+    
+#     alphas, omegas, ks = [], [], []
+    
+#     progress_bar = st.progress(0)
+#     status_text = st.empty()
+    
+#     for i, idx in enumerate(indices):
+#         window_slice = slice(idx - window, idx)
+#         driver_vals = data['driver_close'].iloc[window_slice].values
+#         target_vals = data['target_close'].iloc[window_slice].values
+        
+#         alpha, omega, k = fast_oscillator_approximation(driver_vals, target_vals)
+#         alphas.append(alpha)
+#         omegas.append(omega)
+#         ks.append(k)
+        
+#         if i % 5 == 0:  # Update progress less frequently
+#             progress = (i + 1) / len(indices)
+#             progress_bar.progress(progress)
+#             status_text.text(f"Fast oscillator calculation... {i+1}/{len(indices)}")
+    
+#     # Add oscillator features to dataframe
+#     data['oscillator_alpha'] = np.nan
+#     data['oscillator_omega'] = np.nan
+#     data['oscillator_k'] = np.nan
+    
+#     # Assign values only at calculated indices
+#     for i, idx in enumerate(indices):
+#         if idx < len(data):
+#             data.iloc[idx, data.columns.get_loc('oscillator_alpha')] = alphas[i]
+#             data.iloc[idx, data.columns.get_loc('oscillator_omega')] = omegas[i]
+#             data.iloc[idx, data.columns.get_loc('oscillator_k')] = ks[i]
+    
+#     # Forward fill missing values
+#     data['oscillator_alpha'] = data['oscillator_alpha'].ffill()
+#     data['oscillator_omega'] = data['oscillator_omega'].ffill()
+#     data['oscillator_k'] = data['oscillator_k'].ffill()
+    
+#     progress_bar.progress(1.0)
+#     status_text.text("Fast oscillator calculation complete!")
+    
+#     return data
+
+# # Fast Monte Carlo Simulation
+# def fast_monte_carlo(current_price, volatility, horizon, n_simulations):
+#     """Optimized Monte Carlo simulation"""
+#     # Vectorized implementation for speed
+#     random_returns = np.random.normal(0, volatility, (horizon, n_simulations))
+#     cumulative_returns = np.cumsum(random_returns, axis=0)
+#     price_paths = current_price * np.exp(cumulative_returns)
+    
+#     return price_paths
+
+# # Main function
+# def main():
+#     if st.sidebar.button("⚡ Run Fast Prediction", type="primary"):
+#         run_fast_prediction()
+
+# def run_fast_prediction():
+#     """Optimized main prediction function"""
+    
+#     start_str = start_date.strftime("%Y-%m-%d")
+#     end_str = end_date.strftime("%Y-%m-%d")
+    
+#     progress_bar = st.progress(0)
+#     status_text = st.empty()
+    
+#     try:
+#         # Step 1: Download limited data
+#         status_text.text("📥 Downloading data (optimized)...")
+#         progress_bar.progress(10)
+        
+#         df_driver = yf.download(driver_symbol, start=start_str, end=end_str, progress=False, interval="1d")
+#         df_target = yf.download(target_symbol, start=start_str, end=end_str, progress=False, interval="1d")
+        
+#         if df_driver.empty or df_target.empty:
+#             st.error("❌ Failed to download data.")
+#             return
+        
+#         # Step 2: Quick data processing
+#         status_text.text("🔄 Fast data processing...")
+#         progress_bar.progress(30)
+        
+#         data = quick_data_processing(df_driver, df_target, data_points)
+        
+#         if data is None:
+#             st.error("❌ Not enough data for analysis.")
+#             return
+        
+#         # Step 3: Fast oscillator features
+#         if use_oscillator:
+#             status_text.text("🎯 Fast oscillator calculation...")
+#             progress_bar.progress(50)
+#             data = calculate_fast_oscillator_features(data, oscillator_window)
+#         else:
+#             data['oscillator_alpha'] = np.nan
+#             data['oscillator_omega'] = np.nan
+#             data['oscillator_k'] = np.nan
+        
+#         # Step 4: Quick feature preparation
+#         status_text.text("🔧 Preparing features...")
+#         progress_bar.progress(65)
+        
+#         feature_cols = prepare_fast_features(data, use_oscillator)
+#         X, y, features_for_forecast, dates_clean = create_fast_features_target(data, feature_cols, prediction_horizon)
+        
+#         if X.shape[0] == 0:
+#             st.error("❌ No valid data for training.")
+#             return
+        
+#         # Step 5: Fast model training
+#         status_text.text("🤖 Training model...")
+#         progress_bar.progress(80)
+        
+#         results = train_fast_model(X, y, features_for_forecast, model_type, dates_clean)
+        
+#         # Step 6: Quick Monte Carlo
+#         status_text.text("📊 Running simulations...")
+#         progress_bar.progress(90)
+        
+#         current_price = data['target_close'].iloc[-1]
+#         volatility = data['target_ret_1'].std()
+        
+#         simulations = fast_monte_carlo(current_price, volatility, prediction_horizon, num_simulations)
+#         final_prices = simulations[-1, :]
+        
+#         alpha = (100 - confidence_level) / 2
+#         lower_bound = np.percentile(final_prices, alpha)
+#         upper_bound = np.percentile(final_prices, 100 - alpha)
+#         median_price = np.median(final_prices)
+        
+#         prediction_intervals = {
+#             'lower_bound': lower_bound,
+#             'upper_bound': upper_bound,
+#             'median_price': median_price,
+#             'final_prices': final_prices
+#         }
+        
+#         full_results = {
+#             **results,
+#             'monte_carlo': {
+#                 'simulations': simulations,
+#                 'intervals': prediction_intervals,
+#                 'current_price': current_price
+#             },
+#             'data': data
+#         }
+        
+#         # Step 7: Display results
+#         status_text.text("🎯 Generating results...")
+#         progress_bar.progress(95)
+        
+#         display_fast_results(data, full_results, driver_symbol, target_symbol, prediction_horizon)
+        
+#         progress_bar.progress(100)
+#         status_text.text("✅ Analysis complete! (Fast mode)")
+        
+#     except Exception as e:
+#         st.error(f"❌ An error occurred: {str(e)}")
+
+# def quick_data_processing(df_driver, df_target, max_points):
+#     """Fast data processing with limited points"""
+    
+#     data = pd.DataFrame(index=df_driver.index)
+#     data['driver_close'] = df_driver['Close']
+#     data['target_close'] = df_target['Close']
+#     data = data.dropna()
+    
+#     if len(data) < 30:
+#         return None
+    
+#     # Use only recent data points
+#     data = data.tail(max_points).copy()
+    
+#     # Calculate only essential features
+#     data['driver_ret_1'] = data['driver_close'].pct_change(1)
+#     data['target_ret_1'] = data['target_close'].pct_change(1)
+    
+#     data['driver_vol'] = data['driver_ret_1'].rolling(10).std()
+#     data['target_vol'] = data['target_ret_1'].rolling(10).std()
+    
+#     data['price_ratio'] = data['target_close'] / data['driver_close']
+#     data['rolling_corr'] = data['driver_ret_1'].rolling(15).corr(data['target_ret_1'])
+    
+#     # Simple momentum
+#     data['target_momentum'] = data['target_close'] / data['target_close'].rolling(5).mean() - 1
+    
+#     return data
+
+# def prepare_fast_features(data, use_oscillator):
+#     """Prepare minimal feature set"""
+    
+#     base_features = [
+#         'driver_ret_1', 'target_ret_1', 'driver_vol', 'target_vol',
+#         'price_ratio', 'rolling_corr', 'target_momentum'
+#     ]
+    
+#     if use_oscillator:
+#         oscillator_features = ['oscillator_alpha', 'oscillator_omega', 'oscillator_k']
+#         for feature in oscillator_features:
+#             if feature in data.columns and not data[feature].isna().all():
+#                 base_features.append(feature)
+    
+#     return [col for col in base_features if col in data.columns and not data[col].isna().all()]
+
+# def create_fast_features_target(data, feature_cols, prediction_horizon):
+#     """Fast feature and target creation"""
+    
+#     data['future_price'] = data['target_close'].shift(-prediction_horizon)
+#     data['target_up'] = (data['future_price'] > data['target_close']).astype(int)
+    
+#     data_clean = data.dropna().copy()
+    
+#     if len(data_clean) == 0:
+#         raise ValueError("No valid data after preprocessing")
+    
+#     X = data_clean[feature_cols].values
+#     y = data_clean['target_up'].values
+#     dates_clean = data_clean.index
+    
+#     features_for_forecast = data_clean.iloc[-1][feature_cols].values.reshape(1, -1)
+    
+#     return X, y, features_for_forecast, dates_clean
+
+# def train_fast_model(X, y, features_for_forecast, model_type, dates):
+#     """Fast model training"""
+    
+#     if len(X) < 10:
+#         raise ValueError("Not enough samples for training")
+    
+#     split_idx = max(5, int(len(X) * 0.7))
+    
+#     X_train, X_test = X[:split_idx], X[split_idx:]
+#     y_train, y_test = y[:split_idx], y[split_idx:]
+#     dates_test = dates[split_idx:]
+    
+#     if model_type == "Logistic Regression":
+#         classifier = LogisticRegression(random_state=42, max_iter=500, class_weight='balanced')
+#     else:
+#         classifier = RandomForestClassifier(n_estimators=50, random_state=42, class_weight='balanced', max_depth=5)
+    
+#     pipeline = Pipeline([
+#         ('scaler', StandardScaler()),
+#         ('classifier', classifier)
+#     ])
+    
+#     pipeline.fit(X_train, y_train)
+    
+#     y_pred_proba = pipeline.predict_proba(X_test)[:, 1]
+#     y_pred = (y_pred_proba >= 0.5).astype(int)
+    
+#     forecast_proba = pipeline.predict_proba(features_for_forecast)[0, 1]
+    
+#     return {
+#         'pipeline': pipeline,
+#         'y_test': y_test,
+#         'y_pred': y_pred,
+#         'y_pred_proba': y_pred_proba,
+#         'forecast_proba': forecast_proba,
+#         'dates_test': dates_test,
+#     }
+
+# def display_fast_results(data, results, driver_symbol, target_symbol, prediction_horizon):
+#     """Fast results display"""
+    
+#     current_price = results['monte_carlo']['current_price']
+#     intervals = results['monte_carlo']['intervals']
+    
+#     # Generate future dates
+#     last_date = data.index[-1]
+#     prediction_date = last_date + timedelta(days=prediction_horizon)
+    
+#     # Quick results display
+#     st.header("⚡ Fast Prediction Results")
+    
+#     col1, col2, col3, col4 = st.columns(4)
+#     with col1:
+#         st.metric("Current Price", f"${current_price:.2f}")
+#     with col2:
+#         direction = "BULLISH" if results['forecast_proba'] >= 0.5 else "BEARISH"
+#         st.metric("Direction", direction)
+#     with col3:
+#         st.metric("Confidence", f"{results['forecast_proba']:.1%}")
+#     with col4:
+#         change = ((intervals['median_price'] - current_price) / current_price) * 100
+#         st.metric("Expected Change", f"{change:+.1f}%")
+    
+#     # Oscillator visualization (if used)
+#     if use_oscillator and not data['oscillator_alpha'].isna().all():
+#         st.subheader("🎯 Fast Oscillator Analysis")
+        
+#         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        
+#         # Plot latest oscillator values
+#         params = ['Alpha', 'Omega', 'K']
+#         values = [
+#             data['oscillator_alpha'].iloc[-1],
+#             data['oscillator_omega'].iloc[-1], 
+#             data['oscillator_k'].iloc[-1]
+#         ]
+#         colors = ['red', 'blue', 'green']
+        
+#         bars = ax1.bar(params, values, color=colors, alpha=0.7)
+#         ax1.set_title('Current Oscillator State')
+#         ax1.set_ylabel('Parameter Value')
+        
+#         for bar, value in zip(bars, values):
+#             ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+#                     f'{value:.3f}', ha='center', va='bottom')
+        
+#         # Plot oscillator evolution (last 20 points)
+#         recent_data = data.tail(20)
+#         ax2.plot(recent_data.index, recent_data['oscillator_alpha'], 'r-', label='Alpha', alpha=0.7)
+#         ax2.plot(recent_data.index, recent_data['oscillator_omega'], 'b-', label='Omega', alpha=0.7)
+#         ax2.plot(recent_data.index, recent_data['oscillator_k'], 'g-', label='K', alpha=0.7)
+#         ax2.set_title('Recent Oscillator Trends')
+#         ax2.legend()
+#         ax2.tick_params(axis='x', rotation=45)
+        
+#         plt.tight_layout()
+#         st.pyplot(fig)
+    
+#     # Combined prediction plot
+#     st.subheader("📈 Fast Prediction Overview")
+    
+#     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+#     # Left: Probability timeline
+#     dates_test = results['dates_test']
+#     y_pred_proba = results['y_pred_proba']
+    
+#     ax1.plot(dates_test, y_pred_proba, 'b-', alpha=0.7, linewidth=2)
+#     ax1.axhline(0.5, color='red', linestyle='--', alpha=0.5)
+#     ax1.set_title('Prediction Probability Timeline')
+#     ax1.set_ylabel('Probability')
+#     ax1.tick_params(axis='x', rotation=45)
+#     ax1.grid(True, alpha=0.3)
+    
+#     # Right: Monte Carlo distribution
+#     final_prices = intervals['final_prices']
+#     ax2.hist(final_prices, bins=30, alpha=0.7, color='lightblue', edgecolor='black')
+#     ax2.axvline(intervals['lower_bound'], color='red', linestyle='--', label=f'Lower: ${intervals["lower_bound"]:.2f}')
+#     ax2.axvline(intervals['median_price'], color='green', linestyle='-', label=f'Median: ${intervals["median_price"]:.2f}')
+#     ax2.axvline(intervals['upper_bound'], color='red', linestyle='--', label=f'Upper: ${intervals["upper_bound"]:.2f}')
+#     ax2.axvline(current_price, color='blue', linestyle='-', label=f'Current: ${current_price:.2f}')
+#     ax2.set_title(f'Price Distribution ({confidence_level}% CI)')
+#     ax2.set_xlabel('Price')
+#     ax2.legend()
+#     ax2.grid(True, alpha=0.3)
+    
+#     plt.tight_layout()
+#     st.pyplot(fig)
+    
+#     # Quick stats
+#     st.subheader("📊 Quick Statistics")
+    
+#     col1, col2, col3, col4 = st.columns(4)
+#     with col1:
+#         accuracy = accuracy_score(results['y_test'], results['y_pred'])
+#         st.metric("Model Accuracy", f"{accuracy:.3f}")
+#     with col2:
+#         prob_down = np.mean(intervals['final_prices'] < current_price)
+#         st.metric("Prob. Decline", f"{prob_down:.1%}")
+#     with col3:
+#         best_case = np.max(intervals['final_prices'])
+#         best_gain = ((best_case - current_price) / current_price) * 100
+#         st.metric("Best Case", f"{best_gain:+.1f}%")
+#     with col4:
+#         st.metric("Horizon", f"{prediction_horizon} days")
+
+# # Run the app
+# if __name__ == "__main__":
+#     main()
+
+
+
+#V2 Sistem
 # import streamlit as st
 # import numpy as np
 # import pandas as pd
@@ -1124,4 +1545,5 @@ if __name__ == "__main__":
 # # Run the app
 # if __name__ == "__main__":
 #     main()
+
 
