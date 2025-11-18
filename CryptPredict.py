@@ -137,13 +137,17 @@ def run_prediction():
         progress_bar.progress(50)
         
         feature_cols = prepare_features(data, use_oscillator)
-        X, y, features_for_forecast = create_features_target(data, feature_cols, prediction_horizon)
+        X, y, features_for_forecast, dates_clean = create_features_target(data, feature_cols, prediction_horizon)
+        
+        if X.shape[0] == 0:
+            st.error("❌ No valid data for training after preprocessing.")
+            return
         
         # Step 4: Train model and predict
         status_text.text("🤖 Training model...")
         progress_bar.progress(70)
         
-        results = train_and_predict(X, y, features_for_forecast, model_type)
+        results = train_and_predict(X, y, features_for_forecast, model_type, dates_clean)
         
         # Step 5: Display results
         status_text.text("📊 Generating results...")
@@ -184,7 +188,7 @@ def process_data(df_driver, df_target, window, use_oscillator):
     data['ret_spread'] = data['target_ret_1'] - data['driver_ret_1']
     
     # Use only recent data for performance
-    data = data.tail(60).copy()
+    data = data.tail(100).copy()  # Increased from 60 to 100 for more training data
     
     # Oscillator features (simplified)
     if use_oscillator and len(data) >= window:
@@ -217,7 +221,7 @@ def prepare_features(data, use_oscillator):
         oscillator_features = ['momentum', 'driver_influence', 'volatility_ratio']
         # Only add oscillator features that exist in data
         for feature in oscillator_features:
-            if feature in data.columns:
+            if feature in data.columns and not data[feature].isna().all():
                 feature_cols.append(feature)
     
     return feature_cols
@@ -238,19 +242,35 @@ def create_features_target(data, feature_cols, prediction_horizon):
     # Prepare features
     X = data_clean[feature_cols].values
     y = data_clean['target_up'].values
+    dates_clean = data_clean.index
     
     # Features for latest prediction
     features_for_forecast = data_clean.iloc[-1][feature_cols].values.reshape(1, -1)
     
-    return X, y, features_for_forecast
+    return X, y, features_for_forecast, dates_clean
 
-def train_and_predict(X, y, features_for_forecast, model_type):
+def train_and_predict(X, y, features_for_forecast, model_type, dates):
     """Train model and make predictions"""
     
+    # Ensure we have enough data for splitting
+    min_samples = 10
+    if len(X) < min_samples:
+        raise ValueError(f"Not enough samples for training. Need at least {min_samples}, got {len(X)}")
+    
     # Train-test split (time-based)
-    split_idx = int(len(X) * 0.7)
+    split_idx = max(1, int(len(X) * 0.7))  # Ensure at least 1 sample in train set
+    
+    # Adjust split if test set would be too small
+    if len(X) - split_idx < 5:
+        split_idx = max(1, len(X) - 5)  # Ensure at least 5 test samples
+    
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
+    dates_test = dates[split_idx:]
+    
+    # Check if we have enough test samples
+    if len(X_test) == 0:
+        raise ValueError("No test samples available. Try using more data.")
     
     # Create pipeline
     if model_type == "Logistic Regression":
@@ -261,7 +281,7 @@ def train_and_predict(X, y, features_for_forecast, model_type):
         )
     else:
         classifier = RandomForestClassifier(
-            n_estimators=100,
+            n_estimators=50,  # Reduced for faster training
             random_state=42,
             class_weight='balanced'
         )
@@ -288,6 +308,7 @@ def train_and_predict(X, y, features_for_forecast, model_type):
         'y_pred_proba': y_pred_proba,
         'forecast_proba': forecast_proba,
         'X_test': X_test,
+        'dates_test': dates_test,
         'split_idx': split_idx
     }
 
@@ -338,33 +359,66 @@ def display_results(data, results, driver_symbol, target_symbol, prediction_hori
     with col3:
         st.metric("Test Samples", len(results['y_test']))
     
-    # Plot results
+    # Plot results - FIXED DATA ALIGNMENT
     st.subheader("📈 Prediction Timeline")
-    fig, ax = plt.subplots(figsize=(12, 6))
     
-    # Plot probability over time
-    dates = data.index[results['split_idx']:]
-    ax.plot(dates, results['y_pred_proba'], label='Predicted Probability', color='blue', linewidth=2)
-    ax.axhline(y=0.5, color='red', linestyle='--', alpha=0.7, label='Decision Boundary')
+    # Ensure dates and probabilities have the same length
+    dates_test = results['dates_test']
+    y_pred_proba = results['y_pred_proba']
+    y_test = results['y_test']
     
-    # Highlight actual outcomes
-    actual_up = results['y_test'] == 1
-    actual_down = results['y_test'] == 0
+    # Debug information
+    st.write(f"Debug: Dates length: {len(dates_test)}, Probabilities length: {len(y_pred_proba)}")
     
-    if any(actual_up):
-        ax.scatter(dates[actual_up], results['y_pred_proba'][actual_up], 
-                  color='green', alpha=0.6, label='Actual Up', s=50)
-    if any(actual_down):
-        ax.scatter(dates[actual_down], results['y_pred_proba'][actual_down], 
-                  color='red', alpha=0.6, label='Actual Down', s=50)
+    if len(dates_test) != len(y_pred_proba):
+        st.warning(f"⚠️ Data alignment issue: {len(dates_test)} dates vs {len(y_pred_proba)} probabilities")
+        # Use indices for plotting if dates don't match
+        fig, ax = plt.subplots(figsize=(12, 6))
+        x_values = range(len(y_pred_proba))
+        ax.plot(x_values, y_pred_proba, label='Predicted Probability', color='blue', linewidth=2)
+        ax.axhline(y=0.5, color='red', linestyle='--', alpha=0.7, label='Decision Boundary')
+        
+        # Highlight actual outcomes
+        actual_up = y_test == 1
+        actual_down = y_test == 0
+        
+        if any(actual_up):
+            ax.scatter(np.array(x_values)[actual_up], y_pred_proba[actual_up], 
+                      color='green', alpha=0.6, label='Actual Up', s=50)
+        if any(actual_down):
+            ax.scatter(np.array(x_values)[actual_down], y_pred_proba[actual_down], 
+                      color='red', alpha=0.6, label='Actual Down', s=50)
+        
+        ax.set_xlabel('Test Sample Index')
+        ax.set_ylabel('Probability of Price Increase')
+        ax.set_title(f'{target_symbol} Price Direction Prediction')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+    else:
+        # Normal plotting when lengths match
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(dates_test, y_pred_proba, label='Predicted Probability', color='blue', linewidth=2)
+        ax.axhline(y=0.5, color='red', linestyle='--', alpha=0.7, label='Decision Boundary')
+        
+        # Highlight actual outcomes
+        actual_up = y_test == 1
+        actual_down = y_test == 0
+        
+        if any(actual_up):
+            ax.scatter(dates_test[actual_up], y_pred_proba[actual_up], 
+                      color='green', alpha=0.6, label='Actual Up', s=50)
+        if any(actual_down):
+            ax.scatter(dates_test[actual_down], y_pred_proba[actual_down], 
+                      color='red', alpha=0.6, label='Actual Down', s=50)
+        
+        ax.set_xlabel('Date')
+        ax.set_ylabel('Probability of Price Increase')
+        ax.set_title(f'{target_symbol} Price Direction Prediction')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
     
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Probability of Price Increase')
-    ax.set_title(f'{target_symbol} Price Direction Prediction')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    plt.xticks(rotation=45)
     plt.tight_layout()
     st.pyplot(fig)
     
@@ -379,9 +433,15 @@ def display_results(data, results, driver_symbol, target_symbol, prediction_hori
                            index=['Actual Down', 'Actual Up'],
                            columns=['Predicted Down', 'Predicted Up'])
         st.dataframe(cm_df)
+        
+        # Data summary
+        st.write("### Data Summary")
+        st.write(f"Total samples: {len(data)}")
+        st.write(f"Training samples: {results['split_idx']}")
+        st.write(f"Test samples: {len(results['y_test'])}")
+        st.write(f"Features used: {len(results['pipeline'].named_steps['classifier'].coef_[0]) if hasattr(results['pipeline'].named_steps['classifier'], 'coef_') else 'N/A'}")
 
 # Run the app
 if __name__ == "__main__":
     main()
-
 
