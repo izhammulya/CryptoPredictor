@@ -17,23 +17,30 @@ except ImportError as e:
 
 # Streamlit app configuration
 st.set_page_config(
-    page_title="Crypto Horizon Predictor",
+    page_title="Crypto Prediction Suite",
     page_icon="🚀",
     layout="wide"
 )
 
 # App title and description
-st.title("🚀 Crypto Horizon Predictor with Monte Carlo Paths")
+st.title("🚀 Crypto Prediction Suite: Monte Carlo, Logistic Regression & Random Forest")
 st.markdown("""
-**Clear Visualizations:**
-- **Price Prediction Horizon** with future dates
-- **Monte Carlo Simulation Paths** visible on graph
-- **Confidence Intervals** for price targets
-- **Multiple Timeframes** for predictions
+**Three Modeling Approaches:**
+- **🎲 Monte Carlo**: Price simulation with confidence intervals
+- **📊 Logistic Regression**: Direction prediction (Up/Down)  
+- **🌲 Random Forest**: Ensemble learning for price direction
 """)
 
 # Sidebar configuration
 st.sidebar.header("🎯 Prediction Configuration")
+
+# Model Selection
+st.sidebar.subheader("🤖 Select Prediction Method")
+prediction_method = st.sidebar.radio(
+    "Choose Model:",
+    ["Monte Carlo Simulation", "Logistic Regression", "Random Forest"],
+    index=0
+)
 
 # Date range input
 st.sidebar.subheader("📅 Date Range")
@@ -44,7 +51,7 @@ with col2:
     end_date = st.date_input("End Date", value=pd.to_datetime("today"))
 
 # Cryptocurrency selection
-st.sidebar.subheader("💰 Cryptocurrencies")
+st.sidebar.subheader("💰 Cryptocurrency")
 crypto_options = {
     "ETH-USD": "Ethereum",
     "BTC-USD": "Bitcoin", 
@@ -55,43 +62,38 @@ crypto_options = {
 }
 
 target_symbol = st.sidebar.selectbox(
-    "Target Cryptocurrency", 
+    "Select Cryptocurrency", 
     options=list(crypto_options.keys()),
     index=3
 )
 
-# Prediction Settings
-st.sidebar.subheader("🎯 Prediction Settings")
-prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 30, 7)
-show_multiple_horizons = st.sidebar.checkbox("Show Multiple Horizons", value=True)
-
-if show_multiple_horizons:
-    horizons = st.sidebar.multiselect(
-        "Additional Horizons to Show",
-        [1, 3, 5, 10, 14, 21, 30],
-        default=[1, 3, 10]
-    )
-else:
-    horizons = [prediction_horizon]
-
-# Monte Carlo Settings
-st.sidebar.subheader("🎲 Monte Carlo Simulation")
-num_simulations = st.sidebar.slider("Number of Paths", 50, 1000, 200)
-num_paths_to_show = st.sidebar.slider("Paths to Visualize", 10, 100, 50)
-confidence_level = st.sidebar.slider("Confidence Level", 80, 99, 90)
-
-show_paths = st.sidebar.checkbox("Show Monte Carlo Paths", value=True)
-show_confidence_bands = st.sidebar.checkbox("Show Confidence Bands", value=True)
-
-# Enhanced Monte Carlo Simulation
-def enhanced_monte_carlo(current_price, historical_returns, horizon, n_simulations):
-    """Enhanced Monte Carlo with better price simulation"""
+# Method-specific parameters
+if prediction_method == "Monte Carlo Simulation":
+    st.sidebar.subheader("🎲 Monte Carlo Settings")
+    prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 90, 30)
+    num_simulations = st.sidebar.slider("Number of Simulations", 100, 5000, 1000)
+    confidence_level = st.sidebar.slider("Confidence Level", 80, 99, 95)
+    show_paths = st.sidebar.checkbox("Show Simulation Paths", value=True)
     
-    # Use historical return characteristics
+elif prediction_method == "Logistic Regression":
+    st.sidebar.subheader("📊 Logistic Regression Settings")
+    prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 30, 7)
+    train_test_split = st.sidebar.slider("Train/Test Split", 0.6, 0.9, 0.8)
+    use_technical_features = st.sidebar.checkbox("Use Technical Features", value=True)
+    
+elif prediction_method == "Random Forest":
+    st.sidebar.subheader("🌲 Random Forest Settings")
+    prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 30, 7)
+    n_estimators = st.sidebar.slider("Number of Trees", 50, 500, 100)
+    max_depth = st.sidebar.slider("Max Tree Depth", 3, 20, 10)
+
+# Monte Carlo Functions
+def monte_carlo_simulation(current_price, historical_returns, horizon, n_simulations):
+    """Enhanced Monte Carlo simulation"""
     mean_return = np.mean(historical_returns)
     std_return = np.std(historical_returns)
     
-    # Generate random returns based on historical characteristics
+    # Generate random returns
     random_returns = np.random.normal(mean_return, std_return, (horizon, n_simulations))
     
     # Calculate price paths
@@ -103,8 +105,8 @@ def enhanced_monte_carlo(current_price, historical_returns, horizon, n_simulatio
     
     return price_paths
 
-def calculate_horizon_predictions(price_paths, confidence_level):
-    """Calculate predictions for each horizon"""
+def calculate_prediction_intervals(price_paths, confidence_level):
+    """Calculate prediction intervals for all horizons"""
     horizon_predictions = {}
     
     for day in range(1, price_paths.shape[0]):
@@ -126,13 +128,144 @@ def calculate_horizon_predictions(price_paths, confidence_level):
     
     return horizon_predictions
 
+# Logistic Regression Functions
+def prepare_logistic_features(data, horizon):
+    """Prepare features for logistic regression"""
+    df = data.copy()
+    
+    # Price features
+    df['returns_1d'] = df['Close'].pct_change(1)
+    df['returns_5d'] = df['Close'].pct_change(5)
+    df['returns_20d'] = df['Close'].pct_change(20)
+    
+    # Volatility features
+    df['volatility_5d'] = df['returns_1d'].rolling(5).std()
+    df['volatility_20d'] = df['returns_1d'].rolling(20).std()
+    
+    # Moving averages
+    df['sma_10'] = df['Close'].rolling(10).mean()
+    df['sma_30'] = df['Close'].rolling(30).mean()
+    
+    # Momentum
+    df['momentum_5d'] = df['Close'] / df['Close'].shift(5) - 1
+    df['momentum_10d'] = df['Close'] / df['Close'].shift(10) - 1
+    
+    # Target variable (price direction)
+    df['future_price'] = df['Close'].shift(-horizon)
+    df['price_up'] = (df['future_price'] > df['Close']).astype(int)
+    
+    # Drop NaN values
+    df = df.dropna()
+    
+    return df
+
+def train_logistic_model(data, horizon, test_size=0.2):
+    """Train logistic regression model"""
+    # Prepare features
+    df = prepare_logistic_features(data, horizon)
+    
+    # Feature columns
+    feature_cols = ['returns_1d', 'returns_5d', 'returns_20d', 
+                   'volatility_5d', 'volatility_20d', 'momentum_5d', 'momentum_10d']
+    
+    X = df[feature_cols].values
+    y = df['price_up'].values
+    
+    # Train-test split
+    split_idx = int(len(X) * (1 - test_size))
+    X_train, X_test = X[:split_idx], X[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
+    dates_test = df.index[split_idx:]
+    
+    # Create and train pipeline
+    pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('classifier', LogisticRegression(random_state=42, max_iter=1000))
+    ])
+    
+    pipeline.fit(X_train, y_train)
+    
+    # Predictions
+    y_pred_proba = pipeline.predict_proba(X_test)[:, 1]
+    y_pred = (y_pred_proba >= 0.5).astype(int)
+    
+    # Current prediction
+    current_features = df[feature_cols].iloc[-1].values.reshape(1, -1)
+    current_prediction = pipeline.predict_proba(current_features)[0, 1]
+    
+    return {
+        'pipeline': pipeline,
+        'feature_cols': feature_cols,
+        'X_test': X_test,
+        'y_test': y_test,
+        'y_pred': y_pred,
+        'y_pred_proba': y_pred_proba,
+        'dates_test': dates_test,
+        'current_prediction': current_prediction,
+        'feature_importance': pipeline.named_steps['classifier'].coef_[0]
+    }
+
+# Random Forest Functions
+def train_random_forest(data, horizon, n_estimators=100, max_depth=10, test_size=0.2):
+    """Train random forest model"""
+    # Prepare features
+    df = prepare_logistic_features(data, horizon)
+    
+    # Feature columns
+    feature_cols = ['returns_1d', 'returns_5d', 'returns_20d', 
+                   'volatility_5d', 'volatility_20d', 'momentum_5d', 'momentum_10d']
+    
+    X = df[feature_cols].values
+    y = df['price_up'].values
+    
+    # Train-test split
+    split_idx = int(len(X) * (1 - test_size))
+    X_train, X_test = X[:split_idx], X[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
+    dates_test = df.index[split_idx:]
+    
+    # Create and train pipeline
+    pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('classifier', RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=42
+        ))
+    ])
+    
+    pipeline.fit(X_train, y_train)
+    
+    # Predictions
+    y_pred_proba = pipeline.predict_proba(X_test)[:, 1]
+    y_pred = (y_pred_proba >= 0.5).astype(int)
+    
+    # Current prediction
+    current_features = df[feature_cols].iloc[-1].values.reshape(1, -1)
+    current_prediction = pipeline.predict_proba(current_features)[0, 1]
+    
+    # Feature importance
+    feature_importance = pipeline.named_steps['classifier'].feature_importances_
+    
+    return {
+        'pipeline': pipeline,
+        'feature_cols': feature_cols,
+        'X_test': X_test,
+        'y_test': y_test,
+        'y_pred': y_pred,
+        'y_pred_proba': y_pred_proba,
+        'dates_test': dates_test,
+        'current_prediction': current_prediction,
+        'feature_importance': feature_importance
+    }
+
 # Main function
 def main():
-    if st.sidebar.button("🎯 Generate Horizon Predictions", type="primary"):
-        run_horizon_prediction()
+    if st.sidebar.button("🎯 Run Prediction", type="primary"):
+        run_prediction()
 
-def run_horizon_prediction():
-    """Main prediction function with clear horizon visualization"""
+def run_prediction():
+    """Main prediction function"""
     
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
@@ -142,8 +275,8 @@ def run_horizon_prediction():
     
     try:
         # Step 1: Download data
-        status_text.text("📥 Downloading price data...")
-        progress_bar.progress(20)
+        status_text.text("📥 Downloading data...")
+        progress_bar.progress(25)
         
         df = yf.download(target_symbol, start=start_str, end=end_str, progress=False)
         
@@ -151,270 +284,241 @@ def run_horizon_prediction():
             st.error("❌ Failed to download data.")
             return
         
-        # Step 2: Prepare data
-        status_text.text("🔄 Preparing data for simulation...")
-        progress_bar.progress(40)
+        current_price = df['Close'].iloc[-1]
+        current_date = df.index[-1]
         
-        data = df[['Close']].copy()
-        data['Returns'] = data['Close'].pct_change()
-        data = data.dropna()
+        # Step 2: Run selected method
+        status_text.text(f"🤖 Running {prediction_method}...")
+        progress_bar.progress(50)
         
-        current_price = data['Close'].iloc[-1]
-        historical_returns = data['Returns'].tail(100).values  # Use recent returns
+        if prediction_method == "Monte Carlo Simulation":
+            results = run_monte_carlo(df, current_price, prediction_horizon, num_simulations, confidence_level)
+            
+        elif prediction_method == "Logistic Regression":
+            results = train_logistic_model(df, prediction_horizon, 1-train_test_split)
+            
+        elif prediction_method == "Random Forest":
+            results = train_random_forest(df, prediction_horizon, n_estimators, max_depth, 1-train_test_split)
         
-        # Step 3: Run Monte Carlo for maximum horizon
-        status_text.text("🎲 Running Monte Carlo simulations...")
-        progress_bar.progress(60)
+        # Step 3: Display results
+        status_text.text("📊 Generating results...")
+        progress_bar.progress(75)
         
-        max_horizon = max(horizons) if horizons else prediction_horizon
-        price_paths = enhanced_monte_carlo(current_price, historical_returns, max_horizon, num_simulations)
-        
-        # Calculate predictions for all horizons
-        horizon_predictions = calculate_horizon_predictions(price_paths, confidence_level)
-        
-        # Step 4: Generate future dates
-        last_date = data.index[-1]
-        future_dates = [last_date + timedelta(days=i) for i in range(max_horizon + 1)]
-        
-        status_text.text("📊 Creating visualizations...")
-        progress_bar.progress(80)
-        
-        # Display results
-        display_horizon_predictions(data, price_paths, horizon_predictions, future_dates, 
-                                  target_symbol, current_price, horizons)
+        display_results(df, results, prediction_method, target_symbol, current_price, prediction_horizon)
         
         progress_bar.progress(100)
-        status_text.text("✅ Horizon predictions complete!")
+        status_text.text("✅ Prediction complete!")
         
     except Exception as e:
         st.error(f"❌ An error occurred: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 
-def display_horizon_predictions(data, price_paths, horizon_predictions, future_dates, 
-                              symbol, current_price, horizons):
-    """Display horizon predictions with clear Monte Carlo visualization"""
+def run_monte_carlo(data, current_price, horizon, n_simulations, confidence_level):
+    """Run Monte Carlo simulation"""
+    returns = data['Close'].pct_change().dropna()
     
-    # Main results header
-    st.header(f"🎯 {symbol} Price Horizon Predictions")
+    price_paths = monte_carlo_simulation(current_price, returns, horizon, n_simulations)
+    predictions = calculate_prediction_intervals(price_paths, confidence_level)
     
-    # Current price and key metrics
+    return {
+        'price_paths': price_paths,
+        'predictions': predictions,
+        'current_price': current_price,
+        'returns': returns
+    }
+
+def display_results(data, results, method, symbol, current_price, horizon):
+    """Display results based on selected method"""
+    
+    st.header(f"🎯 {method} Results for {symbol}")
+    
+    if method == "Monte Carlo Simulation":
+        display_monte_carlo_results(data, results, symbol, horizon)
+        
+    elif method in ["Logistic Regression", "Random Forest"]:
+        display_ml_results(data, results, method, symbol, horizon)
+
+def display_monte_carlo_results(data, results, symbol, horizon):
+    """Display Monte Carlo results"""
+    
+    price_paths = results['price_paths']
+    predictions = results['predictions']
+    current_price = results['current_price']
+    
+    # Generate future dates
+    last_date = data.index[-1]
+    future_dates = [last_date + timedelta(days=i) for i in range(horizon + 1)]
+    
+    # Key metrics
+    pred = predictions[horizon]
+    expected_change = ((pred['median_price'] - current_price) / current_price) * 100
+    prob_up = np.mean(pred['prices'] > current_price) * 100
+    
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Current Price", f"${current_price:.2f}")
-    with col2:
-        main_horizon = horizons[0] if horizons else 7
-        main_pred = horizon_predictions[main_horizon]
-        expected_change = ((main_pred['median_price'] - current_price) / current_price) * 100
-        st.metric(f"{main_horizon}-Day Expected", f"${main_pred['median_price']:.2f}", 
-                 f"{expected_change:+.1f}%")
-    with col3:
-        prob_up = np.mean(main_pred['prices'] > current_price) * 100
-        st.metric("Probability Up", f"{prob_up:.1f}%")
-    with col4:
-        st.metric("Confidence Level", f"{confidence_level}%")
+    col1.metric("Current Price", f"${current_price:.2f}")
+    col2.metric("Median Prediction", f"${pred['median_price']:.2f}", f"{expected_change:+.1f}%")
+    col3.metric("Probability Up", f"{prob_up:.1f}%")
+    col4.metric("Confidence Interval", 
+                f"${pred['lower_bound']:.2f} - ${pred['upper_bound']:.2f}")
     
-    # MAIN VISUALIZATION: Price History + Monte Carlo Future
-    st.subheader("📈 Price History with Monte Carlo Future Paths")
+    # Monte Carlo visualization
+    st.subheader("📈 Monte Carlo Simulation Paths")
     
-    fig1, ax1 = plt.subplots(figsize=(14, 8))
+    fig, ax = plt.subplots(figsize=(12, 6))
     
-    # Plot historical prices (last 60 days for clarity)
-    historical_to_show = data.tail(60)
-    ax1.plot(historical_to_show.index, historical_to_show['Close'], 
-             'b-', linewidth=3, label='Historical Price', alpha=0.8)
-    
-    # Plot current price as reference
-    ax1.axhline(y=current_price, color='black', linestyle='--', alpha=0.7, 
-                label=f'Current Price: ${current_price:.2f}')
+    # Plot historical data
+    historical_data = data['Close'].tail(60)
+    ax.plot(historical_data.index, historical_data.values, 'b-', linewidth=2, label='Historical Price')
     
     # Plot Monte Carlo paths
     if show_paths:
-        paths_to_show = min(num_paths_to_show, num_simulations)
-        for i in range(paths_to_show):
-            ax1.plot(future_dates, price_paths[:, i], 'gray', alpha=0.1, linewidth=0.5)
+        for i in range(min(100, num_simulations)):
+            ax.plot(future_dates, price_paths[:, i], 'gray', alpha=0.1, linewidth=0.5)
     
-    # Plot confidence bands
-    if show_confidence_bands:
-        percentiles = np.percentile(price_paths, [5, 25, 50, 75, 95], axis=1)
-        
-        # 90% confidence interval
-        ax1.fill_between(future_dates, percentiles[0], percentiles[4], 
-                        alpha=0.2, color='red', label='90% Confidence Interval')
-        
-        # 50% confidence interval
-        ax1.fill_between(future_dates, percentiles[1], percentiles[3], 
-                        alpha=0.3, color='orange', label='50% Confidence Interval')
-        
-        # Median path
-        ax1.plot(future_dates, percentiles[2], 'r-', linewidth=3, 
-                label='Median Prediction Path', alpha=0.8)
+    # Plot confidence intervals
+    percentiles = np.percentile(price_paths, [5, 25, 50, 75, 95], axis=1)
+    ax.fill_between(future_dates, percentiles[0], percentiles[4], alpha=0.3, color='red', label='90% CI')
+    ax.fill_between(future_dates, percentiles[1], percentiles[3], alpha=0.4, color='orange', label='50% CI')
+    ax.plot(future_dates, percentiles[2], 'r-', linewidth=3, label='Median Path')
     
-    # Add vertical line separating history from future
-    ax1.axvline(x=future_dates[0], color='green', linestyle=':', alpha=0.7, 
-                label='Prediction Start')
+    # Current price and prediction markers
+    ax.axhline(y=current_price, color='black', linestyle='--', alpha=0.7, label='Current Price')
+    ax.axvline(x=future_dates[0], color='green', linestyle=':', alpha=0.7, label='Today')
+    ax.axvline(x=future_dates[horizon], color='purple', linestyle='--', alpha=0.7, label=f'{horizon}-Day Horizon')
     
-    # Add horizon markers
-    colors = ['purple', 'brown', 'teal', 'magenta', 'navy']
-    for i, horizon in enumerate(horizons):
-        if horizon <= len(future_dates) - 1:
-            horizon_date = future_dates[horizon]
-            pred = horizon_predictions[horizon]
-            
-            # Vertical line at horizon
-            ax1.axvline(x=horizon_date, color=colors[i % len(colors)], linestyle='--', 
-                       alpha=0.6, label=f'{horizon}-Day Horizon')
-            
-            # Price target markers
-            ax1.plot(horizon_date, pred['median_price'], 'o', color=colors[i % len(colors)], 
-                    markersize=8, markeredgecolor='white', markeredgewidth=1)
-    
-    ax1.set_xlabel('Date')
-    ax1.set_ylabel('Price ($)')
-    ax1.set_title(f'{symbol} Price Prediction with Monte Carlo Simulation\n'
-                 f'Showing {num_simulations} simulations with {confidence_level}% confidence intervals')
-    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    ax1.grid(True, alpha=0.3)
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Price ($)')
+    ax.set_title(f'{symbol} Monte Carlo Price Simulation ({num_simulations} paths)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     plt.xticks(rotation=45)
     plt.tight_layout()
     
-    st.pyplot(fig1)
+    st.pyplot(fig)
     
-    # HORIZON PREDICTION TABLE
-    st.subheader("📊 Horizon Prediction Summary")
+    # Prediction distribution
+    st.subheader("📊 Price Distribution at Horizon")
     
-    prediction_data = []
-    for horizon in sorted(horizons):
-        if horizon in horizon_predictions:
-            pred = horizon_predictions[horizon]
-            horizon_date = future_dates[horizon]
-            
-            price_change = ((pred['median_price'] - current_price) / current_price) * 100
-            lower_change = ((pred['lower_bound'] - current_price) / current_price) * 100
-            upper_change = ((pred['upper_bound'] - current_price) / current_price) * 100
-            
-            prob_up = np.mean(pred['prices'] > current_price) * 100
-            
-            prediction_data.append({
-                'Horizon (Days)': horizon,
-                'Prediction Date': horizon_date.strftime('%Y-%m-%d'),
-                'Median Price': f"${pred['median_price']:.2f}",
-                'Price Change': f"{price_change:+.1f}%",
-                'Confidence Interval': f"${pred['lower_bound']:.2f} - ${pred['upper_bound']:.2f}",
-                'Range Change': f"{lower_change:+.1f}% to {upper_change:+.1f}%",
-                'Probability Up': f"{prob_up:.1f}%"
-            })
+    fig2, ax2 = plt.subplots(figsize=(10, 5))
+    prices_at_horizon = price_paths[horizon]
     
-    prediction_df = pd.DataFrame(prediction_data)
-    st.dataframe(prediction_df, use_container_width=True)
+    ax2.hist(prices_at_horizon, bins=50, alpha=0.7, color='lightblue', edgecolor='black', density=True)
+    ax2.axvline(pred['lower_bound'], color='red', linestyle='--', linewidth=2, label=f'Lower: ${pred["lower_bound"]:.2f}')
+    ax2.axvline(pred['median_price'], color='green', linestyle='-', linewidth=2, label=f'Median: ${pred["median_price"]:.2f}')
+    ax2.axvline(pred['upper_bound'], color='red', linestyle='--', linewidth=2, label=f'Upper: ${pred["upper_bound"]:.2f}')
+    ax2.axvline(current_price, color='blue', linestyle='-', linewidth=2, label=f'Current: ${current_price:.2f}')
     
-    # MONTE CARLO DISTRIBUTION BY HORIZON
-    st.subheader("📈 Price Distribution by Horizon")
+    ax2.set_xlabel('Price ($)')
+    ax2.set_ylabel('Probability Density')
+    ax2.set_title(f'{symbol} Price Distribution after {horizon} days')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
     
-    fig2, axes = plt.subplots(2, 2, figsize=(15, 10))
-    axes = axes.flatten()
+    st.pyplot(fig2)
+
+def display_ml_results(data, results, method, symbol, horizon):
+    """Display machine learning results"""
     
-    horizons_to_plot = horizons[:4]  # Plot first 4 horizons
+    current_prediction = results['current_prediction']
+    y_test = results['y_test']
+    y_pred = results['y_pred']
+    y_pred_proba = results['y_pred_proba']
+    dates_test = results['dates_test']
     
-    for idx, horizon in enumerate(horizons_to_plot):
-        if idx < len(axes) and horizon in horizon_predictions:
-            pred = horizon_predictions[horizon]
-            prices = pred['prices']
-            
-            axes[idx].hist(prices, bins=30, alpha=0.7, color='skyblue', edgecolor='black', density=True)
-            axes[idx].axvline(pred['lower_bound'], color='red', linestyle='--', 
-                            label=f'Lower: ${pred["lower_bound"]:.2f}')
-            axes[idx].axvline(pred['median_price'], color='green', linestyle='-', 
-                            label=f'Median: ${pred["median_price"]:.2f}')
-            axes[idx].axvline(pred['upper_bound'], color='red', linestyle='--', 
-                            label=f'Upper: ${pred["upper_bound"]:.2f}')
-            axes[idx].axvline(current_price, color='blue', linestyle='-', 
-                            label=f'Current: ${current_price:.2f}')
-            
-            axes[idx].set_xlabel('Price ($)')
-            axes[idx].set_ylabel('Probability Density')
-            axes[idx].set_title(f'{horizon}-Day Horizon Distribution\n'
-                              f'90% CI: [${pred["lower_bound"]:.2f}, ${pred["upper_bound"]:.2f}]')
-            axes[idx].legend()
-            axes[idx].grid(True, alpha=0.3)
+    # Performance metrics
+    accuracy = accuracy_score(y_test, y_pred)
+    prob_up = current_prediction * 100
+    direction = "UP" if current_prediction >= 0.5 else "DOWN"
     
-    # Hide unused subplots
-    for idx in range(len(horizons_to_plot), len(axes)):
-        axes[idx].set_visible(False)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Model Accuracy", f"{accuracy:.3f}")
+    col2.metric("Current Prediction", direction)
+    col3.metric("Probability", f"{current_prediction:.3f}")
+    col4.metric("Confidence", f"{prob_up:.1f}%")
+    
+    # Prediction timeline
+    st.subheader("📈 Prediction Probability Timeline")
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    ax.plot(dates_test, y_pred_proba, 'b-', linewidth=2, label='Prediction Probability', alpha=0.7)
+    ax.axhline(y=0.5, color='red', linestyle='--', alpha=0.7, label='Decision Boundary')
+    
+    # Highlight correct/incorrect predictions
+    correct_predictions = (y_pred == y_test)
+    incorrect_predictions = ~correct_predictions
+    
+    if any(correct_predictions):
+        ax.scatter(dates_test[correct_predictions], y_pred_proba[correct_predictions], 
+                  color='green', alpha=0.6, label='Correct Prediction', s=30)
+    
+    if any(incorrect_predictions):
+        ax.scatter(dates_test[incorrect_predictions], y_pred_proba[incorrect_predictions], 
+                  color='red', alpha=0.6, label='Incorrect Prediction', s=30)
+    
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Probability of Price Increase')
+    ax.set_title(f'{symbol} {method} Predictions ({horizon}-day horizon) - Accuracy: {accuracy:.3f}')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    
+    st.pyplot(fig)
+    
+    # Feature importance
+    st.subheader("🔍 Feature Importance")
+    
+    feature_importance = results['feature_importance']
+    feature_names = results['feature_cols']
+    
+    # For logistic regression, take absolute values for importance
+    if method == "Logistic Regression":
+        feature_importance = np.abs(feature_importance)
+    
+    importance_df = pd.DataFrame({
+        'Feature': feature_names,
+        'Importance': feature_importance
+    }).sort_values('Importance', ascending=True)
+    
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    y_pos = np.arange(len(importance_df))
+    
+    ax2.barh(y_pos, importance_df['Importance'], color='skyblue', alpha=0.7)
+    ax2.set_yticks(y_pos)
+    ax2.set_yticklabels(importance_df['Feature'])
+    ax2.set_xlabel('Importance')
+    ax2.set_title(f'Feature Importance - {method}')
+    ax2.grid(True, alpha=0.3, axis='x')
     
     plt.tight_layout()
     st.pyplot(fig2)
     
-    # RISK ANALYSIS
-    st.subheader("⚡ Risk Analysis by Horizon")
-    
-    risk_data = []
-    for horizon in sorted(horizons):
-        if horizon in horizon_predictions:
-            pred = horizon_predictions[horizon]
-            prices = pred['prices']
-            
-            # Risk metrics
-            prob_decline = np.mean(prices < current_price) * 100
-            var_95 = np.percentile(prices, 5)  # Value at Risk 95%
-            var_loss = ((var_95 - current_price) / current_price) * 100
-            best_case = np.max(prices)
-            best_gain = ((best_case - current_price) / current_price) * 100
-            worst_case = np.min(prices)
-            worst_loss = ((worst_case - current_price) / current_price) * 100
-            
-            risk_data.append({
-                'Horizon': f'{horizon} days',
-                'Prob. Decline': f'{prob_decline:.1f}%',
-                'VaR (95%)': f'{var_loss:.1f}%',
-                'Worst Case': f'{worst_loss:.1f}%',
-                'Best Case': f'{best_gain:.1f}%',
-                'Expected Return': f"{((pred['median_price'] - current_price) / current_price * 100):+.1f}%"
-            })
-    
-    risk_df = pd.DataFrame(risk_data)
-    st.dataframe(risk_df, use_container_width=True)
-    
-    # DOWNLOAD PREDICTION DATA
-    st.subheader("💾 Download Prediction Data")
-    
-    # Create downloadable dataframe
-    download_data = []
-    for horizon in sorted(horizons):
-        if horizon in horizon_predictions:
-            pred = horizon_predictions[horizon]
-            download_data.append({
-                'horizon_days': horizon,
-                'prediction_date': future_dates[horizon].strftime('%Y-%m-%d'),
-                'median_price': pred['median_price'],
-                'lower_bound': pred['lower_bound'],
-                'upper_bound': pred['upper_bound'],
-                'probability_up': np.mean(pred['prices'] > current_price) * 100
-            })
-    
-    download_df = pd.DataFrame(download_data)
-    csv = download_df.to_csv(index=False)
-    
-    st.download_button(
-        label="📥 Download Horizon Predictions CSV",
-        data=csv,
-        file_name=f"{symbol}_horizon_predictions.csv",
-        mime="text/csv"
-    )
+    # Model performance details
+    with st.expander("📊 Detailed Performance Metrics"):
+        st.write("### Classification Report")
+        st.text(classification_report(y_test, y_pred))
+        
+        st.write("### Confusion Matrix")
+        cm = confusion_matrix(y_test, y_pred)
+        cm_df = pd.DataFrame(cm, 
+                           index=['Actual Down', 'Actual Up'],
+                           columns=['Predicted Down', 'Predicted Up'])
+        st.dataframe(cm_df)
 
 # Run the app
 if __name__ == "__main__":
     main()
 
-# Add explanation
+# Add method comparison
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**🎯 What You'll See:**
-- **Monte Carlo Paths**: Gray lines showing possible price trajectories
-- **Confidence Bands**: Colored areas showing prediction uncertainty
-- **Horizon Markers**: Vertical lines at prediction dates
-- **Price Targets**: Dots showing median predictions at each horizon
-- **Distribution Charts**: Probability distributions for each timeframe
+**🤖 Method Comparison:**
+- **Monte Carlo**: Best for price range predictions
+- **Logistic Regression**: Good for direction (Up/Down)  
+- **Random Forest**: Robust for complex patterns
 """)
-
 
 # # V2 Sistem
 # import streamlit as st
@@ -1028,5 +1132,6 @@ st.sidebar.info("""
 # # Run the app
 # if __name__ == "__main__":
 #     main()
+
 
 
