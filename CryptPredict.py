@@ -384,11 +384,4 @@ def display_results(data, results, driver_symbol, target_symbol, prediction_hori
 if __name__ == "__main__":
     main()
 
-# Add installation instructions in sidebar
-st.sidebar.markdown("---")
-st.sidebar.info("""
-**Installation Help:**
-If you see import errors, install required packages:
 
-```bash
-pip install streamlit numpy pandas yfinance scikit-learn scipy matplotlib
