@@ -11,8 +11,6 @@ try:
     from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline
     from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-    from scipy.integrate import solve_ivp
-    from scipy.optimize import least_squares
 except ImportError as e:
     st.error(f"Missing required packages: {e}")
     st.stop()
@@ -30,8 +28,8 @@ st.markdown("""
 **Complete Feature Set:**
 - **Driver-Target Cryptocurrency Pairs** with oscillator analysis
 - **🎲 Monte Carlo**: Price simulation with confidence intervals
-- **📊 Logistic Regression**: Direction prediction (Up/Down)  
-- **🌲 Random Forest**: Ensemble learning for price direction
+- **📊 Logistic Regression**: Direction prediction with price targets  
+- **🌲 Random Forest**: Ensemble learning with price predictions
 - **🎯 Oscillator Parameters**: Alpha, Omega, K visualization
 """)
 
@@ -92,13 +90,6 @@ if use_oscillator:
         value=30,
         help="Window for fitting oscillator parameters"
     )
-    
-    st.sidebar.info("""
-    **Oscillator Parameters:**
-    - **Alpha (α)**: Damping coefficient
-    - **Omega (ω)**: Natural frequency  
-    - **K**: Coupling strength
-    """)
 
 # Method-specific parameters
 if prediction_method == "Monte Carlo Simulation":
@@ -118,6 +109,7 @@ elif prediction_method == "Random Forest":
     prediction_horizon = st.sidebar.slider("Prediction Horizon (days)", 1, 30, 7)
     n_estimators = st.sidebar.slider("Number of Trees", 50, 500, 100)
     max_depth = st.sidebar.slider("Max Tree Depth", 3, 20, 10)
+    train_test_split = st.sidebar.slider("Train/Test Split", 0.6, 0.9, 0.8)
 
 # OSCILLATOR FUNCTIONS
 def fast_oscillator_approximation(driver_prices, target_prices):
@@ -251,7 +243,7 @@ def calculate_prediction_intervals(price_paths, confidence_level):
     
     return horizon_predictions
 
-# MACHINE LEARNING FUNCTIONS
+# MACHINE LEARNING FUNCTIONS WITH PRICE PREDICTIONS
 def prepare_ml_features(data, horizon, use_oscillator):
     """Prepare features for machine learning models"""
     df = data.copy()
@@ -274,9 +266,10 @@ def prepare_ml_features(data, horizon, use_oscillator):
     df['target_momentum_5d'] = df['target_close'] / df['target_close'].shift(5) - 1
     df['driver_momentum_5d'] = df['driver_close'] / df['driver_close'].shift(5) - 1
     
-    # Target variable (price direction)
+    # Target variables
     df['future_price'] = df['target_close'].shift(-horizon)
     df['price_up'] = (df['future_price'] > df['target_close']).astype(int)
+    df['price_change_pct'] = (df['future_price'] / df['target_close'] - 1) * 100
     
     # Add oscillator features if enabled
     if use_oscillator:
@@ -291,11 +284,11 @@ def prepare_ml_features(data, horizon, use_oscillator):
     return df
 
 def train_ml_model(data, horizon, model_type, use_oscillator, **kwargs):
-    """Train machine learning model (Logistic Regression or Random Forest)"""
+    """Train machine learning model with price predictions"""
     # Prepare features
     df = prepare_ml_features(data, horizon, use_oscillator)
     
-    # Feature columns
+    # Feature columns for direction prediction
     base_features = [
         'driver_returns_1d', 'driver_returns_5d', 'driver_volatility_10d',
         'target_returns_1d', 'target_returns_5d', 'target_volatility_10d',
@@ -313,16 +306,18 @@ def train_ml_model(data, horizon, model_type, use_oscillator, **kwargs):
     feature_cols = [col for col in base_features if col in df.columns]
     
     X = df[feature_cols].values
-    y = df['price_up'].values
+    y_direction = df['price_up'].values
+    y_price_change = df['price_change_pct'].values
     
     # Train-test split
     test_size = kwargs.get('test_size', 0.2)
     split_idx = int(len(X) * (1 - test_size))
     X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+    y_train_dir, y_test_dir = y_direction[:split_idx], y_direction[split_idx:]
+    y_train_pct, y_test_pct = y_price_change[:split_idx], y_price_change[split_idx:]
     dates_test = df.index[split_idx:]
     
-    # Create pipeline based on model type
+    # Create pipeline for direction prediction
     if model_type == "Logistic Regression":
         classifier = LogisticRegression(random_state=42, max_iter=1000, class_weight='balanced')
     else:  # Random Forest
@@ -335,36 +330,66 @@ def train_ml_model(data, horizon, model_type, use_oscillator, **kwargs):
             class_weight='balanced'
         )
     
-    pipeline = Pipeline([
+    pipeline_dir = Pipeline([
         ('scaler', StandardScaler()),
         ('classifier', classifier)
     ])
     
-    pipeline.fit(X_train, y_train)
+    pipeline_dir.fit(X_train, y_train_dir)
+    
+    # Create pipeline for price change prediction (regression)
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.linear_model import LinearRegression
+    
+    if model_type == "Logistic Regression":
+        regressor = LinearRegression()
+    else:
+        regressor = RandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=42
+        )
+    
+    pipeline_pct = Pipeline([
+        ('scaler', StandardScaler()),
+        ('regressor', regressor)
+    ])
+    
+    pipeline_pct.fit(X_train, y_train_pct)
     
     # Predictions
-    y_pred_proba = pipeline.predict_proba(X_test)[:, 1]
-    y_pred = (y_pred_proba >= 0.5).astype(int)
+    y_pred_proba = pipeline_dir.predict_proba(X_test)[:, 1]
+    y_pred_dir = (y_pred_proba >= 0.5).astype(int)
+    y_pred_pct = pipeline_pct.predict(X_test)
     
     # Current prediction
     current_features = df[feature_cols].iloc[-1].values.reshape(1, -1)
-    current_prediction = pipeline.predict_proba(current_features)[0, 1]
+    current_prediction_dir = pipeline_dir.predict_proba(current_features)[0, 1]
+    current_prediction_pct = pipeline_pct.predict(current_features)[0]
+    current_price = df['target_close'].iloc[-1]
+    predicted_price = current_price * (1 + current_prediction_pct / 100)
     
     # Feature importance
     if model_type == "Logistic Regression":
-        feature_importance = np.abs(pipeline.named_steps['classifier'].coef_[0])
+        feature_importance = np.abs(pipeline_dir.named_steps['classifier'].coef_[0])
     else:
-        feature_importance = pipeline.named_steps['classifier'].feature_importances_
+        feature_importance = pipeline_dir.named_steps['classifier'].feature_importances_
     
     return {
-        'pipeline': pipeline,
+        'pipeline_dir': pipeline_dir,
+        'pipeline_pct': pipeline_pct,
         'feature_cols': feature_cols,
         'X_test': X_test,
-        'y_test': y_test,
-        'y_pred': y_pred,
+        'y_test_dir': y_test_dir,
+        'y_pred_dir': y_pred_dir,
         'y_pred_proba': y_pred_proba,
+        'y_pred_pct': y_pred_pct,
+        'y_test_pct': y_test_pct,
         'dates_test': dates_test,
-        'current_prediction': current_prediction,
+        'current_prediction_dir': current_prediction_dir,
+        'current_prediction_pct': current_prediction_pct,
+        'current_price': current_price,
+        'predicted_price': predicted_price,
         'feature_importance': feature_importance,
         'feature_names': feature_cols
     }
@@ -427,11 +452,9 @@ def run_prediction():
             results = run_monte_carlo(data, current_target_price, prediction_horizon, num_simulations, confidence_level)
         else:
             # For ML models, pass additional parameters
-            ml_params = {}
+            ml_params = {'test_size': 1-train_test_split}
             if prediction_method == "Random Forest":
-                ml_params = {'n_estimators': n_estimators, 'max_depth': max_depth, 'test_size': 1-train_test_split}
-            else:
-                ml_params = {'test_size': 1-train_test_split}
+                ml_params.update({'n_estimators': n_estimators, 'max_depth': max_depth})
                 
             results = train_ml_model(data, prediction_horizon, prediction_method, use_oscillator, **ml_params)
         
@@ -627,35 +650,55 @@ def display_monte_carlo_results(data, results, driver_symbol, target_symbol, hor
     st.pyplot(fig)
 
 def display_ml_results(data, results, method, driver_symbol, target_symbol, horizon):
-    """Display machine learning results"""
+    """Display machine learning results with PRICE PREDICTIONS"""
     
-    current_prediction = results['current_prediction']
-    y_test = results['y_test']
-    y_pred = results['y_pred']
+    current_prediction_dir = results['current_prediction_dir']
+    current_prediction_pct = results['current_prediction_pct']
+    current_price = results['current_price']
+    predicted_price = results['predicted_price']
+    y_test_dir = results['y_test_dir']
+    y_pred_dir = results['y_pred_dir']
     y_pred_proba = results['y_pred_proba']
+    y_pred_pct = results['y_pred_pct']
     dates_test = results['dates_test']
     
     # Performance metrics
-    accuracy = accuracy_score(y_test, y_pred)
-    prob_up = current_prediction * 100
-    direction = "UP" if current_prediction >= 0.5 else "DOWN"
+    accuracy = accuracy_score(y_test_dir, y_pred_dir)
+    prob_up = current_prediction_dir * 100
+    direction = "UP" if current_prediction_dir >= 0.5 else "DOWN"
+    price_change = current_prediction_pct
+    prediction_date = data.index[-1] + timedelta(days=horizon)
     
-    st.subheader(f"📊 {method} Direction Prediction")
+    st.subheader(f"📊 {method} Price Prediction")
     
+    # Price prediction metrics
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Model Accuracy", f"{accuracy:.3f}")
-    col2.metric("Current Prediction", direction)
-    col3.metric("Probability", f"{current_prediction:.3f}")
-    col4.metric("Confidence", f"{prob_up:.1f}%")
+    col1.metric("Current Price", f"${current_price:.2f}")
+    col2.metric("Predicted Price", f"${predicted_price:.2f}", f"{price_change:+.1f}%")
+    col3.metric("Direction", direction, f"Probability: {prob_up:.1f}%")
+    col4.metric("Prediction Date", prediction_date.strftime('%Y-%m-%d'))
+    
+    # Model performance
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Direction Accuracy", f"{accuracy:.3f}")
+    
+    # Calculate price prediction accuracy (within 5%)
+    price_accuracy = np.mean(np.abs(y_pred_pct - results['y_test_pct']) < 5)
+    col2.metric("Price Accuracy (±5%)", f"{price_accuracy:.3f}")
+    
+    avg_error = np.mean(np.abs(y_pred_pct - results['y_test_pct']))
+    col3.metric("Avg Error", f"{avg_error:.1f}%")
     
     # Prediction timeline
+    st.subheader("📈 Prediction Probability Timeline")
+    
     fig, ax = plt.subplots(figsize=(12, 6))
     
     ax.plot(dates_test, y_pred_proba, 'b-', linewidth=2, label='Prediction Probability', alpha=0.7)
     ax.axhline(y=0.5, color='red', linestyle='--', alpha=0.7, label='Decision Boundary')
     
     # Highlight correct/incorrect predictions
-    correct_predictions = (y_pred == y_test)
+    correct_predictions = (y_pred_dir == y_test_dir)
     incorrect_predictions = ~correct_predictions
     
     if any(correct_predictions):
@@ -676,6 +719,27 @@ def display_ml_results(data, results, method, driver_symbol, target_symbol, hori
     
     st.pyplot(fig)
     
+    # Price prediction vs actual
+    st.subheader("💰 Price Prediction Performance")
+    
+    fig2, ax2 = plt.subplots(figsize=(12, 6))
+    
+    # Plot actual vs predicted price changes
+    actual_changes = results['y_test_pct']
+    predicted_changes = y_pred_pct
+    
+    ax2.scatter(actual_changes, predicted_changes, alpha=0.6, color='blue')
+    ax2.plot([min(actual_changes), max(actual_changes)], [min(actual_changes), max(actual_changes)], 
+             'r--', alpha=0.8, label='Perfect Prediction')
+    ax2.set_xlabel('Actual Price Change (%)')
+    ax2.set_ylabel('Predicted Price Change (%)')
+    ax2.set_title(f'{target_symbol} Price Change Prediction vs Actual\n{method} | Horizon: {horizon} days')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    st.pyplot(fig2)
+    
     # Feature importance
     st.subheader("🔍 Feature Importance")
     
@@ -687,23 +751,59 @@ def display_ml_results(data, results, method, driver_symbol, target_symbol, hori
         'Importance': feature_importance
     }).sort_values('Importance', ascending=True)
     
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    fig3, ax3 = plt.subplots(figsize=(10, 6))
     y_pos = np.arange(len(importance_df))
     
-    ax2.barh(y_pos, importance_df['Importance'], color='skyblue', alpha=0.7)
-    ax2.set_yticks(y_pos)
-    ax2.set_yticklabels(importance_df['Feature'])
-    ax2.set_xlabel('Importance')
-    ax2.set_title(f'Feature Importance - {method}\n(Oscillator features in red)')
-    ax2.grid(True, alpha=0.3, axis='x')
+    ax3.barh(y_pos, importance_df['Importance'], color='skyblue', alpha=0.7)
+    ax3.set_yticks(y_pos)
+    ax3.set_yticklabels(importance_df['Feature'])
+    ax3.set_xlabel('Importance')
+    ax3.set_title(f'Feature Importance - {method}\n(Oscillator features in red)')
+    ax3.grid(True, alpha=0.3, axis='x')
     
     # Highlight oscillator features
     for i, feature in enumerate(importance_df['Feature']):
         if 'oscillator' in feature:
-            ax2.get_children()[i].set_color('red')
+            ax3.get_children()[i].set_color('red')
     
     plt.tight_layout()
-    st.pyplot(fig2)
+    st.pyplot(fig3)
+    
+    # Trading suggestion based on prediction
+    st.subheader("💡 Trading Suggestion")
+    
+    suggestion_col1, suggestion_col2 = st.columns(2)
+    
+    with suggestion_col1:
+        if current_prediction_dir >= 0.7:
+            st.success(f"**STRONG BUY SIGNAL** 🟢")
+            st.write(f"- Probability of increase: {prob_up:.1f}%")
+            st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
+            st.write(f"- Confidence: High")
+        elif current_prediction_dir >= 0.6:
+            st.info(f"**MODERATE BUY SIGNAL** 🟡")
+            st.write(f"- Probability of increase: {prob_up:.1f}%")
+            st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
+            st.write(f"- Confidence: Medium")
+        elif current_prediction_dir >= 0.4:
+            st.warning(f"**HOLD SIGNAL** ⚪")
+            st.write(f"- Uncertainty: {min(prob_up, 100-prob_up):.1f}%")
+            st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
+            st.write(f"- Confidence: Low")
+        else:
+            st.error(f"**SELL SIGNAL** 🔴")
+            st.write(f"- Probability of decrease: {100-prob_up:.1f}%")
+            st.write(f"- Expected price: ${predicted_price:.2f} ({price_change:+.1f}%)")
+            st.write(f"- Confidence: High")
+    
+    with suggestion_col2:
+        st.write("**Prediction Details:**")
+        st.write(f"- **Model**: {method}")
+        st.write(f"- **Horizon**: {horizon} days")
+        st.write(f"- **Target Date**: {prediction_date.strftime('%Y-%m-%d')}")
+        st.write(f"- **Driver Influence**: {driver_symbol}")
+        if use_oscillator:
+            st.write(f"- **Oscillator Features**: Enabled")
 
 # Run the app
 if __name__ == "__main__":
@@ -714,8 +814,8 @@ st.sidebar.markdown("---")
 st.sidebar.info("""
 **🤖 Method Comparison:**
 - **Monte Carlo**: Price range predictions with confidence intervals
-- **Logistic Regression**: Direction (Up/Down) with probability scores  
-- **Random Forest**: Robust pattern recognition with feature importance
+- **Logistic Regression**: Direction + Price predictions with linear model  
+- **Random Forest**: Robust pattern recognition with ensemble learning
 - **Oscillators**: Driver-Target relationship dynamics
 """)
 
@@ -1331,6 +1431,7 @@ st.sidebar.info("""
 # # # Run the app
 # # if __name__ == "__main__":
 # #     main()
+
 
 
 
