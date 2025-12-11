@@ -1,2 +1,2 @@
 # CryptoPredictor
-Precit crypto using ML and ODE
+Precit crypto using ML and Simple ODE 
